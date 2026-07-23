@@ -1,0 +1,21 @@
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    ports:
+      - "5173:5173" # Vite dev server (open this)
+      - "3001:3001" # Express API
+    environment:
+      PORT: 3001
+      DATA_DIR: /data
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 32)}
+      NODE_ENV: development
+    volumes:
+      - ./:/app # live source for hot reload
+      # Anonymous volumes keep the image's installed node_modules (with the
+      # container-native better-sqlite3 build) instead of the host's.
+      - /app/node_modules
+      - /app/web/node_modules
+      - /app/server/node_modules
+      - ./data:/data # SQLite cache persisted on the host

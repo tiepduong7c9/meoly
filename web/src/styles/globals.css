@@ -1,0 +1,17 @@
+/* Astryx layers first — order matters (reset → core → theme). */
+@import '@astryxdesign/core/reset.css';
+@import '@astryxdesign/core/astryx.css';
+@import '@astryxdesign/theme-neutral/theme.css';
+
+/* Tailwind last so utility classes win over component defaults. */
+@import 'tailwindcss';
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}

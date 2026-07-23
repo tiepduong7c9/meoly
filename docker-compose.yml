@@ -1,0 +1,14 @@
+services:
+  meoly:
+    build: .
+    image: meoly
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      DATA_DIR: /data
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 32)}
+      NODE_ENV: production
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
