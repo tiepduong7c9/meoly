@@ -11,7 +11,10 @@ import './db/index.js'; // initialize DB + schema on boot
 import { accountsRouter } from './routes/accounts.js';
 import { foldersRouter } from './routes/folders.js';
 import { messagesRouter, HttpError } from './routes/messages.js';
+import { aiRouter } from './routes/ai.js';
 import { startBackgroundSync } from './imap/scheduler.js';
+import { startAiTriage } from './ai/scheduler.js';
+import { startTelegram } from './telegram/bot.js';
 
 const app = express();
 
@@ -31,6 +34,7 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/accounts', accountsRouter);
 app.use('/api/accounts/:id/folders', foldersRouter);
 app.use('/api/accounts/:id/messages', messagesRouter);
+app.use('/api/ai', aiRouter);
 
 // Serve the built SPA in production, with history-API fallback.
 if (env.isProd && fs.existsSync(env.webDist)) {
@@ -52,4 +56,6 @@ app.listen(env.port, () => {
   console.log(`meoly server listening on http://localhost:${env.port}`);
   console.log(`  data dir: ${env.dataDir}`);
   startBackgroundSync();
+  startAiTriage();
+  startTelegram();
 });

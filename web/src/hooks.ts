@@ -4,7 +4,16 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { api } from './api/client';
-import type { Folder, MessageDetail, MessageSummary, NewAccountInput } from './api/types';
+import type {
+  AiAccountSettings,
+  AiBatchAction,
+  AiDecision,
+  AiGlobalSettingsPatch,
+  Folder,
+  MessageDetail,
+  MessageSummary,
+  NewAccountInput,
+} from './api/types';
 
 export function useAccounts() {
   return useQuery({ queryKey: ['accounts'], queryFn: api.listAccounts });
@@ -59,6 +68,94 @@ export function useMessage(
     queryKey: ['message', accountId, folder, uid],
     queryFn: () => api.getMessage(accountId!, folder!, uid!),
     enabled: !!accountId && !!folder && uid != null,
+  });
+}
+
+// --- AI triage ---
+
+export function useAiStatus() {
+  return useQuery({
+    queryKey: ['ai', 'status'],
+    queryFn: api.aiStatus,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useAiSuggestions(status = 'pending') {
+  return useQuery({
+    queryKey: ['ai', 'suggestions', status],
+    queryFn: () => api.aiSuggestions(status),
+    // Poll so decisions made from Telegram (or auto-apply) show up here too.
+    refetchInterval: 8_000,
+  });
+}
+
+export function useAiDecision() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; action: AiDecision }) => api.aiDecide(v.id, v.action),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['ai'] });
+      // A decision may move/read mail, so refresh the mail views too.
+      qc.invalidateQueries({ queryKey: ['messages'] });
+      qc.invalidateQueries({ queryKey: ['folders'] });
+    },
+  });
+}
+
+export function useAiBatchDecision() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { ids: string[]; action: AiBatchAction }) =>
+      api.aiDecideBatch(v.ids, v.action),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['ai'] });
+      qc.invalidateQueries({ queryKey: ['messages'] });
+      qc.invalidateQueries({ queryKey: ['folders'] });
+    },
+  });
+}
+
+export function useRunAi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.aiRun(),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['ai'] }),
+  });
+}
+
+export function useAiSettings(accountId: string | null) {
+  return useQuery({
+    queryKey: ['ai', 'settings', accountId],
+    queryFn: () => api.aiGetSettings(accountId!),
+    enabled: !!accountId,
+  });
+}
+
+export function useUpdateAiSettings(accountId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<Omit<AiAccountSettings, 'accountId'>>) =>
+      api.aiUpdateSettings(accountId, patch),
+    onSuccess: (data) => qc.setQueryData(['ai', 'settings', accountId], data),
+  });
+}
+
+export function useAiGlobalSettings() {
+  return useQuery({
+    queryKey: ['ai', 'global-settings'],
+    queryFn: api.aiGetGlobalSettings,
+  });
+}
+
+export function useUpdateAiGlobalSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: AiGlobalSettingsPatch) => api.aiUpdateGlobalSettings(patch),
+    onSuccess: (data) => {
+      qc.setQueryData(['ai', 'global-settings'], data);
+      qc.invalidateQueries({ queryKey: ['ai', 'status'] });
+    },
   });
 }
 

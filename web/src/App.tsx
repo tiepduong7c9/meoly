@@ -4,11 +4,15 @@ import { AccountSidebar } from './components/AccountSidebar';
 import { MessageList } from './components/MessageList';
 import { MessageView } from './components/MessageView';
 import { AddAccountDialog } from './components/AddAccountDialog';
+import { ReviewPanel } from './components/ReviewPanel';
 import { useAccounts, useFolders } from './hooks';
+
+type View = 'mail' | 'review';
 
 export function App() {
   const { data: accounts = [], isLoading } = useAccounts();
   const [showAdd, setShowAdd] = useState(false);
+  const [view, setView] = useState<View>('mail');
   const [accountId, setAccountId] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
   const [uid, setUid] = useState<number | null>(null);
@@ -47,35 +51,45 @@ export function App() {
         accounts={accounts}
         selectedAccount={accountId}
         selectedFolder={folder}
-        onSelectAccount={selectAccount}
-        onSelectFolder={selectFolder}
+        view={view}
+        onSelectAccount={(id) => {
+          setView('mail');
+          selectAccount(id);
+        }}
+        onSelectFolder={(path) => {
+          setView('mail');
+          selectFolder(path);
+        }}
+        onSelectReview={() => setView('review')}
         onAddAccount={() => setShowAdd(true)}
       />
 
-      {accountId && folder ? (
-        <MessageList
-          accountId={accountId}
-          folder={folder}
-          selectedUid={uid}
-          onSelect={setUid}
-        />
+      {view === 'review' ? (
+        <ReviewPanel accounts={accounts} />
+      ) : accountId && folder ? (
+        <>
+          <MessageList
+            accountId={accountId}
+            folder={folder}
+            selectedUid={uid}
+            onSelect={setUid}
+          />
+          {uid != null ? (
+            <MessageView
+              accountId={accountId}
+              folder={folder}
+              uid={uid}
+              folders={folders.data ?? []}
+              onClose={() => setUid(null)}
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-neutral-400">
+              Select a message to read
+            </div>
+          )}
+        </>
       ) : (
         <EmptyState isLoading={isLoading} hasAccounts={accounts.length > 0} />
-      )}
-
-      {accountId && folder && uid != null && (
-        <MessageView
-          accountId={accountId}
-          folder={folder}
-          uid={uid}
-          folders={folders.data ?? []}
-          onClose={() => setUid(null)}
-        />
-      )}
-      {accountId && folder && uid == null && (
-        <div className="flex flex-1 items-center justify-center text-neutral-400">
-          Select a message to read
-        </div>
       )}
 
       {showAdd && <AddAccountDialog onClose={() => setShowAdd(false)} />}

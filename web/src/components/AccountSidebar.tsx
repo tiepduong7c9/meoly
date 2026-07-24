@@ -1,15 +1,17 @@
-import { Plus, Mail, Trash, RefreshCw, AlertCircle } from 'lucide-react';
+import { Plus, Mail, Trash, RefreshCw, AlertCircle, Bot } from 'lucide-react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import type { Account, Folder } from '../api/types';
-import { useDeleteAccount, useFolders, useSyncAccount } from '../hooks';
+import { useAiStatus, useDeleteAccount, useFolders, useSyncAccount } from '../hooks';
 import { folderIcon, sortFolders } from '../lib/folders';
 
 interface Props {
   accounts: Account[];
   selectedAccount: string | null;
   selectedFolder: string | null;
+  view: 'mail' | 'review';
   onSelectAccount: (id: string) => void;
   onSelectFolder: (path: string) => void;
+  onSelectReview: () => void;
   onAddAccount: () => void;
 }
 
@@ -17,10 +19,16 @@ export function AccountSidebar({
   accounts,
   selectedAccount,
   selectedFolder,
+  view,
   onSelectAccount,
   onSelectFolder,
+  onSelectReview,
   onAddAccount,
 }: Props) {
+  const aiStatus = useAiStatus();
+  const pending = aiStatus.data?.counts?.pending ?? 0;
+  const aiEnabled = aiStatus.data?.enabled ?? false;
+
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50">
       <div className="flex items-center justify-between px-4 py-3">
@@ -35,6 +43,29 @@ export function AccountSidebar({
           <Plus size={18} />
         </button>
       </div>
+
+      {(aiEnabled || pending > 0) && (
+        <div className="px-2 pb-1">
+          <button
+            onClick={onSelectReview}
+            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium ${
+              view === 'review' ? 'bg-neutral-800 text-white' : 'hover:bg-neutral-100'
+            }`}
+          >
+            <Bot size={16} className="shrink-0" />
+            <span className="flex-1">AI Review</span>
+            {pending > 0 && (
+              <span
+                className={`rounded-full px-1.5 text-xs ${
+                  view === 'review' ? 'bg-white/20' : 'bg-blue-100 text-blue-700'
+                }`}
+              >
+                {pending}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-2 pb-4">
         {accounts.length === 0 && (

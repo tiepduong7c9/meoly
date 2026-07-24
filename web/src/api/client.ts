@@ -1,5 +1,12 @@
 import type {
   Account,
+  AiAccountSettings,
+  AiBatchAction,
+  AiDecision,
+  AiGlobalSettings,
+  AiGlobalSettingsPatch,
+  AiStatus,
+  AiSuggestion,
   Folder,
   MessageDetail,
   MessageSummary,
@@ -76,4 +83,43 @@ export const api = {
       `/api/accounts/${accountId}/messages/${uid}?${q(folder)}${hard ? '&hard=true' : ''}`,
       { method: 'DELETE' },
     ),
+
+  // --- AI triage ---
+  aiStatus: () => request<AiStatus>('/api/ai/status'),
+
+  aiSuggestions: (status = 'pending') =>
+    request<AiSuggestion[]>(`/api/ai/suggestions?status=${encodeURIComponent(status)}`),
+
+  aiDecide: (id: string, action: AiDecision) =>
+    request<{ ok: true; status: string; applied: boolean; dryRun: boolean; alreadyResolved: boolean }>(
+      `/api/ai/suggestions/${id}/decision`,
+      { method: 'POST', body: JSON.stringify({ action }) },
+    ),
+
+  aiDecideBatch: (ids: string[], action: AiBatchAction) =>
+    request<{ ok: true; results: Array<Record<string, unknown>> }>(
+      '/api/ai/suggestions/decision',
+      { method: 'POST', body: JSON.stringify({ ids, action }) },
+    ),
+
+  aiRun: () =>
+    request<{ ok: true }>('/api/ai/run', { method: 'POST', body: JSON.stringify({}) }),
+
+  aiGetSettings: (accountId: string) =>
+    request<AiAccountSettings>(`/api/ai/accounts/${accountId}/settings`),
+
+  aiUpdateSettings: (accountId: string, patch: Partial<Omit<AiAccountSettings, 'accountId'>>) =>
+    request<AiAccountSettings>(`/api/ai/accounts/${accountId}/settings`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+
+  aiGetGlobalSettings: () =>
+    request<AiGlobalSettings>('/api/ai/global-settings'),
+
+  aiUpdateGlobalSettings: (patch: AiGlobalSettingsPatch) =>
+    request<AiGlobalSettings>('/api/ai/global-settings', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
 };

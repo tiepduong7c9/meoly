@@ -108,7 +108,7 @@ export function MessageView({ accountId, folder, uid, folders, onClose }: Props)
   );
 }
 
-function MessageBody({ html, text }: { html: string | null; text: string | null }) {
+export function MessageBody({ html, text }: { html: string | null; text: string | null }) {
   if (html) {
     // Render untrusted HTML inside a sandboxed iframe (no scripts, no same-origin).
     return (

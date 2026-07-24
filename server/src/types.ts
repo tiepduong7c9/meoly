@@ -68,3 +68,48 @@ export interface Attachment {
   contentType: string;
   size: number;
 }
+
+/** Actions the AI can suggest / the user can apply to a message. */
+export type AiAction = 'keep' | 'mark_read' | 'archive' | 'delete';
+
+export type AiSuggestionStatus =
+  | 'pending'
+  | 'approved'
+  | 'applied'
+  | 'rejected'
+  | 'error'
+  | 'superseded';
+
+export type AiDecisionSource = 'ai_auto' | 'web' | 'telegram';
+
+export interface AiAccountSettingsRow {
+  account_id: string;
+  enabled: number;
+  target_folders: string; // JSON string[]
+  auto_apply: number;
+  auto_apply_min_conf: number;
+  auto_apply_actions: string; // JSON string[]
+}
+
+export interface AiSuggestionRow {
+  id: string;
+  account_id: string;
+  folder_path: string;
+  uid: number;
+  message_id: string | null;
+  subject: string | null;
+  from_addr: string | null;
+  category: string | null;
+  action: AiAction;
+  confidence: number | null;
+  reasoning: string | null;
+  model: string | null;
+  status: AiSuggestionStatus;
+  applied_action: AiAction | null;
+  source: AiDecisionSource | null;
+  dry_run: number;
+  error: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  applied_at: string | null;
+}

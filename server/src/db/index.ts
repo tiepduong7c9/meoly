@@ -65,6 +65,61 @@ CREATE TABLE IF NOT EXISTS bodies (
   PRIMARY KEY (account_id, folder_path, uid),
   FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
+
+-- Per-account AI triage policy. Rows are created lazily from env defaults the
+-- first time an account is triaged, so existing accounts keep working.
+CREATE TABLE IF NOT EXISTS ai_account_settings (
+  account_id           TEXT PRIMARY KEY,
+  enabled              INTEGER NOT NULL DEFAULT 1,
+  target_folders       TEXT NOT NULL DEFAULT '["INBOX"]',      -- JSON string[]
+  auto_apply           INTEGER NOT NULL DEFAULT 0,
+  auto_apply_min_conf  REAL NOT NULL DEFAULT 0.9,
+  auto_apply_actions   TEXT NOT NULL DEFAULT '["mark_read"]',  -- JSON string[]
+  FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+
+-- One row per triaged message. The UNIQUE(account,folder,uid) constraint also
+-- serves as the "already processed" marker so a message is never re-classified.
+CREATE TABLE IF NOT EXISTS ai_suggestions (
+  id             TEXT PRIMARY KEY,
+  account_id     TEXT NOT NULL,
+  folder_path    TEXT NOT NULL,
+  uid            INTEGER NOT NULL,
+  message_id     TEXT,
+  subject        TEXT,
+  from_addr      TEXT,
+  category       TEXT,
+  action         TEXT NOT NULL,                -- keep | mark_read | archive | delete
+  confidence     REAL,
+  reasoning      TEXT,
+  model          TEXT,
+  status         TEXT NOT NULL DEFAULT 'pending',
+                 -- pending | approved | applied | rejected | error | superseded
+  applied_action TEXT,
+  source         TEXT,                          -- ai_auto | web | telegram
+  dry_run        INTEGER NOT NULL DEFAULT 0,
+  error          TEXT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  reviewed_at    TEXT,
+  applied_at     TEXT,
+  UNIQUE (account_id, folder_path, uid),
+  FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_suggestions_status
+  ON ai_suggestions (status, created_at DESC);
+
+-- Singleton global config for AI + Telegram. Overrides env vars at runtime so
+-- the user can reconfigure without restarting the container.
+CREATE TABLE IF NOT EXISTS ai_global_settings (
+  id                  INTEGER PRIMARY KEY CHECK (id = 1),
+  paused              INTEGER NOT NULL DEFAULT 0,
+  llm_api_base_url    TEXT,   -- NULL → use AI_API_BASE_URL env
+  llm_api_key         TEXT,   -- NULL → use AI_API_KEY env
+  llm_model           TEXT,   -- NULL → use AI_MODEL env
+  telegram_bot_token  TEXT,   -- NULL → use TELEGRAM_BOT_TOKEN env
+  telegram_chat_id    TEXT    -- NULL → use TELEGRAM_CHAT_ID env
+);
 `;
 
 fs.mkdirSync(env.dataDir, { recursive: true });
