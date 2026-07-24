@@ -8,6 +8,9 @@ import express, {
 import helmet from 'helmet';
 import { env } from './env.js';
 import './db/index.js'; // initialize DB + schema on boot
+import { generateURI } from 'otplib';
+import { authRouter } from './routes/auth.js';
+import { requireAuth } from './middleware/requireAuth.js';
 import { accountsRouter } from './routes/accounts.js';
 import { foldersRouter } from './routes/folders.js';
 import { messagesRouter, HttpError } from './routes/messages.js';
@@ -30,6 +33,11 @@ app.use(express.json({ limit: '1mb' }));
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
+
+app.use('/api/auth', authRouter);
+
+// Scope auth to API routes only — static SPA files are served without a token.
+app.use('/api', requireAuth);
 
 app.use('/api/accounts', accountsRouter);
 app.use('/api/accounts/:id/folders', foldersRouter);
@@ -55,6 +63,16 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(env.port, () => {
   console.log(`meoly server listening on http://localhost:${env.port}`);
   console.log(`  data dir: ${env.dataDir}`);
+  if (env.auth.enabled) {
+    const otpauth = generateURI({
+      secret: env.auth.totpSecret,
+      issuer: 'Meoly',
+      label: 'meoly',
+      strategy: 'totp',
+    });
+    console.log('  auth: enabled — scan this URL with your authenticator app:');
+    console.log(' ', otpauth);
+  }
   startBackgroundSync();
   startAiTriage();
   startTelegram();

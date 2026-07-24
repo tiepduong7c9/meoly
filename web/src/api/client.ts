@@ -13,11 +13,31 @@ import type {
   NewAccountInput,
 } from './types';
 
+export const SESSION_KEY = 'meoly_token';
+
+export function getToken(): string | null {
+  return sessionStorage.getItem(SESSION_KEY);
+}
+
+export function setToken(token: string): void {
+  sessionStorage.setItem(SESSION_KEY, token);
+}
+
+export function clearToken(): void {
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  });
+  const token = getToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url, { headers, ...init });
+  // Auth routes return 401 as a normal login-failure signal — don't treat as session expiry.
+  if (res.status === 401 && !url.startsWith('/api/auth/')) {
+    clearToken();
+    window.dispatchEvent(new Event('meoly:unauthenticated'));
+    throw new Error('Session expired — please log in again');
+  }
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {
@@ -35,6 +55,14 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 const q = (folder: string) => `folder=${encodeURIComponent(folder)}`;
 
 export const api = {
+  login: (code: string) =>
+    request<{ token: string }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
+
   listAccounts: () => request<Account[]>('/api/accounts'),
 
   addAccount: (input: NewAccountInput) =>
