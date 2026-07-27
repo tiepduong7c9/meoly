@@ -8,6 +8,8 @@ services:
       DATA_DIR: /data
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 32)}
       NODE_ENV: production
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      TOTP_SECRET: ${TOTP_SECRET:-}
     volumes:
       - ./data:/data
     restart: unless-stopped
