@@ -1,4 +1,6 @@
+import { useRef } from 'react';
 import {
+  useIsMutating,
   useMutation,
   useMutationState,
   useQuery,
@@ -46,24 +48,39 @@ export function useFolders(accountId: string | null) {
   });
 }
 
-export function useMessages(accountId: string | null, folder: string | null) {
+export function useMessages(
+  accountId: string | null,
+  folder: string | null,
+  opts: { pausePolling?: boolean } = {},
+) {
   return useQuery({
     queryKey: ['messages', accountId, folder],
     queryFn: () => api.listMessages(accountId!, folder!),
     enabled: !!accountId && !!folder,
     // Poll the open folder so newly synced mail appears without manual refresh.
-    refetchInterval: 12_000,
+    // Paused while destructive actions are in flight: a poll issued mid-mutation
+    // reads the cache before the server's post-move DB delete lands, so its
+    // late-arriving response would resurrect a just-removed message.
+    refetchInterval: opts.pausePolling ? false : 12_000,
   });
 }
 
 /**
- * Like useMessages but filters out any messages whose UID has a pending
- * move/archive/delete mutation. This prevents messages from flashing back into
- * the list if a background refetch returns server state before the IMAP
- * operation (or its follow-up sync) has completed.
+ * Like useMessages but hardened against a just-actioned message flashing back
+ * into the list. Two guards work together:
+ *
+ *  1. Background polling is paused while any move/archive/delete for this folder
+ *     is in flight, so no stale list read can be issued during the action.
+ *  2. Any UID with a still-pending action is filtered out of the rendered list,
+ *     covering the window before the authoritative refetch settles.
+ *
+ * The list read is cache-backed and the server deletes the row only *after* the
+ * (multi-second) IMAP move, so without this a poll that raced the move can
+ * resolve late — after the mutation settled — and briefly restore the message.
  */
 export function useFilteredMessages(accountId: string | null, folder: string | null) {
-  const query = useMessages(accountId, folder);
+  const pending = useIsMutating({ mutationKey: ['message-action', accountId, folder] });
+  const query = useMessages(accountId, folder, { pausePolling: pending > 0 });
 
   const pendingUids = useMutationState({
     filters: {
@@ -199,6 +216,7 @@ export function useMessageMutations(accountId: string, folder: string) {
   const qc = useQueryClient();
   const listKey = ['messages', accountId, folder];
   const foldersKey = ['folders', accountId];
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const rollback = (ctx?: ActionCtx) => {
     if (!ctx) return;
@@ -206,9 +224,21 @@ export function useMessageMutations(accountId: string, folder: string) {
     qc.setQueryData(foldersKey, ctx.prevFolders);
   };
 
+  // Refetch authoritative server state, but only once the LAST destructive
+  // action settles — debounced so a burst of archives triggers a single refetch
+  // instead of one per action. Cancelling first discards any stray in-flight
+  // list read (e.g. issued just before polling paused) so it can't overwrite the
+  // fresh result and briefly resurrect a removed message.
   const invalidateAll = () => {
-    qc.invalidateQueries({ queryKey: ['messages', accountId] });
-    qc.invalidateQueries({ queryKey: foldersKey });
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => {
+      settleTimer.current = null;
+      if (qc.isMutating({ mutationKey: ['message-action', accountId] }) > 0) return;
+      void qc.cancelQueries({ queryKey: ['messages', accountId] }).finally(() => {
+        qc.invalidateQueries({ queryKey: ['messages', accountId] });
+        qc.invalidateQueries({ queryKey: foldersKey });
+      });
+    }, 0);
   };
 
   // Optimistically drop a message from the current folder and adjust counts.
