@@ -3,7 +3,7 @@ import { AlertCircle, Paperclip, RefreshCw } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { MessageSummary } from '../api/types';
-import { useFolders, useMessages } from '../hooks';
+import { useFolders, useFilteredMessages } from '../hooks';
 
 // SQLite datetime('now') is space-separated UTC without a zone; normalize it.
 function serverTimeToMs(s: string | null): number {
@@ -47,7 +47,7 @@ interface Props {
 }
 
 export function MessageList({ accountId, folder, selectedUid, onSelect }: Props) {
-  const { data, isLoading, isFetching, isError, error } = useMessages(accountId, folder);
+  const { data, isLoading, isFetching, isError, error } = useFilteredMessages(accountId, folder);
   const { data: folders } = useFolders(accountId);
   const meta = folders?.find((f) => f.path === folder);
   const qc = useQueryClient();
