@@ -1,7 +1,6 @@
 services:
   meoly:
-    build: .
-    image: meoly
+    image: ghcr.io/tiepduong7c9/meoly:latest
     ports:
       - "3000:3000"
     environment:
