@@ -1,5 +1,6 @@
 import {
   useMutation,
+  useMutationState,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
@@ -53,6 +54,31 @@ export function useMessages(accountId: string | null, folder: string | null) {
     // Poll the open folder so newly synced mail appears without manual refresh.
     refetchInterval: 12_000,
   });
+}
+
+/**
+ * Like useMessages but filters out any messages whose UID has a pending
+ * move/archive/delete mutation. This prevents messages from flashing back into
+ * the list if a background refetch returns server state before the IMAP
+ * operation (or its follow-up sync) has completed.
+ */
+export function useFilteredMessages(accountId: string | null, folder: string | null) {
+  const query = useMessages(accountId, folder);
+
+  const pendingUids = useMutationState({
+    filters: {
+      mutationKey: ['message-action', accountId, folder],
+      status: 'pending',
+    },
+    select: (m) => (m.state.variables as { uid: number } | undefined)?.uid,
+  });
+
+  const pendingSet = new Set(pendingUids.filter((u): u is number => u != null));
+
+  return {
+    ...query,
+    data: pendingSet.size > 0 ? query.data?.filter((m) => !pendingSet.has(m.uid)) : query.data,
+  };
 }
 
 export function useSyncAccount() {
@@ -181,19 +207,8 @@ export function useMessageMutations(accountId: string, folder: string) {
   };
 
   const invalidateAll = () => {
-    if (qc.isMutating() > 0) {
-      // Other message mutations are still in-flight. Cancel any refetch that a
-      // prior onSettled may have started — its response would contain messages
-      // whose DB removal hasn't happened yet, overwriting the optimistic state.
-      // Mark stale but don't refetch; the last mutation to settle will refetch.
-      void qc.cancelQueries({ queryKey: ['messages', accountId] });
-      qc.invalidateQueries({ queryKey: ['messages', accountId], refetchType: 'none' });
-      qc.invalidateQueries({ queryKey: foldersKey, refetchType: 'none' });
-    } else {
-      // All mutations settled; safe to fetch the authoritative server state.
-      qc.invalidateQueries({ queryKey: ['messages', accountId] });
-      qc.invalidateQueries({ queryKey: foldersKey });
-    }
+    qc.invalidateQueries({ queryKey: ['messages', accountId] });
+    qc.invalidateQueries({ queryKey: foldersKey });
   };
 
   // Optimistically drop a message from the current folder and adjust counts.
@@ -222,7 +237,10 @@ export function useMessageMutations(accountId: string, folder: string) {
     alert((err as Error).message);
   };
 
+  const actionKey = ['message-action', accountId, folder];
+
   const move = useMutation({
+    mutationKey: actionKey,
     mutationFn: (v: { uid: number; target: string }) =>
       api.move(accountId, folder, v.uid, v.target),
     onMutate: (v) => optimisticRemove(v.uid),
@@ -231,6 +249,7 @@ export function useMessageMutations(accountId: string, folder: string) {
   });
 
   const archive = useMutation({
+    mutationKey: actionKey,
     mutationFn: (v: { uid: number }) => api.archive(accountId, folder, v.uid),
     onMutate: (v) => optimisticRemove(v.uid),
     onError: (e, _v, ctx) => onError(e, ctx),
@@ -238,6 +257,7 @@ export function useMessageMutations(accountId: string, folder: string) {
   });
 
   const remove = useMutation({
+    mutationKey: actionKey,
     mutationFn: (v: { uid: number; hard?: boolean }) =>
       api.remove(accountId, folder, v.uid, v.hard ?? false),
     onMutate: (v) => optimisticRemove(v.uid),
