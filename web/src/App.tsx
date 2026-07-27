@@ -43,7 +43,7 @@ export function App() {
   return <AuthedApp onLogout={logout} />;
 }
 
-function AuthedApp({ onLogout: _onLogout }: { onLogout: () => void }) {
+function AuthedApp({ onLogout }: { onLogout: () => void }) {
   const { data: accounts = [], isLoading } = useAccounts();
   const [showAdd, setShowAdd] = useState(false);
   const [view, setView] = useState<View>('mail');
@@ -96,6 +96,7 @@ function AuthedApp({ onLogout: _onLogout }: { onLogout: () => void }) {
         }}
         onSelectReview={() => setView('review')}
         onAddAccount={() => setShowAdd(true)}
+        onLogout={onLogout}
       />
 
       {view === 'review' ? (

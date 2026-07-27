@@ -10,7 +10,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   const header = req.headers.authorization ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
   if (!token || !validateSession(token)) {
-    res.status(401).json({ error: 'Unauthorized' });
+    res.status(401).json({ error: 'session_expired' });
     return;
   }
   next();

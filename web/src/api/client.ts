@@ -32,11 +32,19 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(url, { headers, ...init });
-  // Auth routes return 401 as a normal login-failure signal — don't treat as session expiry.
-  if (res.status === 401 && !url.startsWith('/api/auth/')) {
-    clearToken();
-    window.dispatchEvent(new Event('meoly:unauthenticated'));
-    throw new Error('Session expired — please log in again');
+  // Only treat a 401 as session expiry when the server explicitly says so.
+  // Checking the body field avoids logging out on any future route that returns
+  // 401 for a different reason (e.g. a per-resource permission check).
+  if (res.status === 401) {
+    let bodyError: string | undefined;
+    try {
+      bodyError = ((await res.clone().json()) as { error?: string }).error;
+    } catch { /* non-JSON */ }
+    if (bodyError === 'session_expired') {
+      clearToken();
+      window.dispatchEvent(new Event('meoly:unauthenticated'));
+      throw new Error('Session expired — please log in again');
+    }
   }
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;

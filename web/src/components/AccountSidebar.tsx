@@ -1,4 +1,4 @@
-import { Plus, Mail, Trash, RefreshCw, AlertCircle, Bot } from 'lucide-react';
+import { Plus, Mail, Trash, RefreshCw, AlertCircle, Bot, LogOut } from 'lucide-react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import type { Account, Folder } from '../api/types';
 import { useAiStatus, useDeleteAccount, useFolders, useSyncAccount } from '../hooks';
@@ -13,6 +13,7 @@ interface Props {
   onSelectFolder: (path: string) => void;
   onSelectReview: () => void;
   onAddAccount: () => void;
+  onLogout?: () => void;
 }
 
 export function AccountSidebar({
@@ -24,6 +25,7 @@ export function AccountSidebar({
   onSelectFolder,
   onSelectReview,
   onAddAccount,
+  onLogout,
 }: Props) {
   const aiStatus = useAiStatus();
   const pending = aiStatus.data?.counts?.pending ?? 0;
@@ -84,6 +86,18 @@ export function AccountSidebar({
           />
         ))}
       </div>
+
+      {onLogout && (
+        <div className="border-t border-neutral-200 px-2 py-2">
+          <button
+            onClick={onLogout}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+          >
+            <LogOut size={15} />
+            Sign out
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

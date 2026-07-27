@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { db } from '../db/index.js';
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const RATE_WINDOW_MS = 5 * 60 * 1000;
@@ -6,7 +7,15 @@ const MAX_LOGIN_ATTEMPTS = 10;
 
 const sessions = new Map<string, number>(); // token → expiry epoch ms
 const loginAttempts = new Map<string, { count: number; resetAt: number }>(); // ip → attempts
-const usedTotpCodes = new Set<string>(); // `${window}:${code}` — replay guard
+
+// Evict expired rate-limit entries so the map doesn't grow unboundedly when the
+// endpoint is hit from many distinct IPs (e.g. internet scanners).
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of loginAttempts) {
+    if (now > entry.resetAt) loginAttempts.delete(ip);
+  }
+}, RATE_WINDOW_MS);
 
 export function createSession(): string {
   const token = randomBytes(32).toString('hex');
@@ -40,18 +49,23 @@ export function checkRateLimit(ip: string): boolean {
   return true;
 }
 
+const stmtCodeUsed = db.prepare(
+  'SELECT 1 FROM used_totp_codes WHERE (window = ? OR window = ?) AND code = ?',
+);
+const stmtInsertCode = db.prepare(
+  'INSERT OR IGNORE INTO used_totp_codes (window, code) VALUES (?, ?)',
+);
+const stmtEvictCodes = db.prepare('DELETE FROM used_totp_codes WHERE window < ?');
+
 export function isCodeAlreadyUsed(code: string): boolean {
   const win = Math.floor(Date.now() / 30_000);
-  return usedTotpCodes.has(`${win}:${code}`) || usedTotpCodes.has(`${win - 1}:${code}`);
+  return !!stmtCodeUsed.get(win, win - 1, code);
 }
 
 export function recordUsedCode(code: string): void {
   const win = Math.floor(Date.now() / 30_000);
-  usedTotpCodes.add(`${win}:${code}`);
-  usedTotpCodes.add(`${win - 1}:${code}`);
-  // Evict entries older than 2 windows
-  for (const key of usedTotpCodes) {
-    const w = parseInt(key.split(':')[0]);
-    if (win - w > 2) usedTotpCodes.delete(key);
-  }
+  // Mark the code used for both the current and previous window (otplib accepts ±1).
+  stmtInsertCode.run(win, code);
+  stmtInsertCode.run(win - 1, code);
+  stmtEvictCodes.run(win - 2);
 }

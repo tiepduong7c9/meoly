@@ -17,10 +17,9 @@ authRouter.post('/login', async (req, res) => {
     return;
   }
 
-  const ip =
-    (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ??
-    req.socket.remoteAddress ??
-    'unknown';
+  // Always use the direct socket address — ignoring X-Forwarded-For prevents
+  // clients from rotating fake IPs to bypass the rate limiter.
+  const ip = req.socket.remoteAddress ?? 'unknown';
   if (!checkRateLimit(ip)) {
     res.status(429).json({ error: 'Too many attempts — try again in 5 minutes' });
     return;
