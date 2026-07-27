@@ -5,11 +5,45 @@ import { MessageList } from './components/MessageList';
 import { MessageView } from './components/MessageView';
 import { AddAccountDialog } from './components/AddAccountDialog';
 import { ReviewPanel } from './components/ReviewPanel';
+import { LoginPage } from './LoginPage';
 import { useAccounts, useFolders } from './hooks';
+import { api, getToken, clearToken, SESSION_KEY } from './api/client';
 
 type View = 'mail' | 'review';
 
+function useAuthState() {
+  const [authed, setAuthed] = useState(() => !!getToken());
+
+  useEffect(() => {
+    const onUnauthenticated = () => setAuthed(false);
+    window.addEventListener('meoly:unauthenticated', onUnauthenticated);
+    // Also watch sessionStorage so other tabs can trigger logout.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === SESSION_KEY && !e.newValue) setAuthed(false);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('meoly:unauthenticated', onUnauthenticated);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  const logout = () => {
+    clearToken();
+    setAuthed(false);
+    api.logout().catch(() => {});
+  };
+
+  return { authed, login: () => setAuthed(true), logout };
+}
+
 export function App() {
+  const { authed, login, logout } = useAuthState();
+  if (!authed) return <LoginPage onLogin={login} />;
+  return <AuthedApp onLogout={logout} />;
+}
+
+function AuthedApp({ onLogout }: { onLogout: () => void }) {
   const { data: accounts = [], isLoading } = useAccounts();
   const [showAdd, setShowAdd] = useState(false);
   const [view, setView] = useState<View>('mail');
@@ -62,6 +96,7 @@ export function App() {
         }}
         onSelectReview={() => setView('review')}
         onAddAccount={() => setShowAdd(true)}
+        onLogout={onLogout}
       />
 
       {view === 'review' ? (

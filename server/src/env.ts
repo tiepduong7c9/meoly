@@ -61,6 +61,14 @@ function csv(name: string, fallback: string[]): string[] {
   return v.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+const totpSecret = process.env.TOTP_SECRET ?? '';
+const authEnabled = bool('AUTH_ENABLED', !!totpSecret);
+if (authEnabled && !totpSecret) {
+  throw new Error(
+    'AUTH_ENABLED=true but TOTP_SECRET is not set. Generate one with: node -e "import(\'otplib\').then(m=>console.log(m.authenticator.generateSecret()))"',
+  );
+}
+
 export const env = {
   port: Number(process.env.PORT ?? 3001),
   nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -91,6 +99,11 @@ export const env = {
     defaultAutoApply: bool('AI_AUTO_APPLY', false),
     defaultAutoApplyMinConf: num('AI_AUTO_APPLY_MIN_CONFIDENCE', 0.9),
     defaultAutoApplyActions: csv('AI_AUTO_APPLY_ACTIONS', ['mark_read']),
+  },
+
+  auth: {
+    enabled: authEnabled,
+    totpSecret,
   },
 
   telegram: {

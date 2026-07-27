@@ -109,6 +109,16 @@ CREATE TABLE IF NOT EXISTS ai_suggestions (
 CREATE INDEX IF NOT EXISTS idx_ai_suggestions_status
   ON ai_suggestions (status, created_at DESC);
 
+-- Persisted TOTP replay guard. Rows survive server restarts so a captured code
+-- cannot be replayed after a crash/redeploy within the same 30-second window.
+-- Each row is keyed by (window, code) where window = floor(epoch_ms / 30000).
+-- Entries older than 2 windows are deleted after each successful login.
+CREATE TABLE IF NOT EXISTS used_totp_codes (
+  window INTEGER NOT NULL,
+  code   TEXT NOT NULL,
+  PRIMARY KEY (window, code)
+);
+
 -- Singleton global config for AI + Telegram. Overrides env vars at runtime so
 -- the user can reconfigure without restarting the container.
 CREATE TABLE IF NOT EXISTS ai_global_settings (
