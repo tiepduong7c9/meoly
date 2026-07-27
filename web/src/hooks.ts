@@ -181,9 +181,19 @@ export function useMessageMutations(accountId: string, folder: string) {
   };
 
   const invalidateAll = () => {
-    // Prefix match refreshes every folder (source + move/archive/delete target).
-    qc.invalidateQueries({ queryKey: ['messages', accountId] });
-    qc.invalidateQueries({ queryKey: foldersKey });
+    if (qc.isMutating() > 0) {
+      // Other message mutations are still in-flight. Cancel any refetch that a
+      // prior onSettled may have started — its response would contain messages
+      // whose DB removal hasn't happened yet, overwriting the optimistic state.
+      // Mark stale but don't refetch; the last mutation to settle will refetch.
+      void qc.cancelQueries({ queryKey: ['messages', accountId] });
+      qc.invalidateQueries({ queryKey: ['messages', accountId], refetchType: 'none' });
+      qc.invalidateQueries({ queryKey: foldersKey, refetchType: 'none' });
+    } else {
+      // All mutations settled; safe to fetch the authoritative server state.
+      qc.invalidateQueries({ queryKey: ['messages', accountId] });
+      qc.invalidateQueries({ queryKey: foldersKey });
+    }
   };
 
   // Optimistically drop a message from the current folder and adjust counts.
