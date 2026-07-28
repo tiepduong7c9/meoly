@@ -69,22 +69,25 @@ export function useMessages(
  * Like useMessages but hardened against a just-actioned message flashing back
  * into the list. Two guards work together:
  *
- *  1. Background polling is paused while any move/archive/delete for this folder
- *     is in flight, so no stale list read can be issued during the action.
- *  2. Any UID with a still-pending action is filtered out of the rendered list,
- *     covering the window before the authoritative refetch settles.
+ *  1. Background polling is paused while ANY message action for this folder is
+ *     in flight (removals and read-toggles alike), so no stale list read can be
+ *     issued during the action and resolve late.
+ *  2. Any UID with a still-pending *removal* is filtered out of the rendered
+ *     list, covering the window before the authoritative refetch settles. Read
+ *     toggles are excluded — those rows must stay visible, just change state.
  *
- * The list read is cache-backed and the server deletes the row only *after* the
- * (multi-second) IMAP move, so without this a poll that raced the move can
- * resolve late — after the mutation settled — and briefly restore the message.
+ * The list read is cache-backed and the server applies the change only *after*
+ * the (multi-second) IMAP op, so without this a poll that raced the op can
+ * resolve late — after the mutation settled — and briefly restore the old state.
  */
 export function useFilteredMessages(accountId: string | null, folder: string | null) {
+  // Prefix match covers both 'remove' and 'read' actions for this folder.
   const pending = useIsMutating({ mutationKey: ['message-action', accountId, folder] });
   const query = useMessages(accountId, folder, { pausePolling: pending > 0 });
 
   const pendingUids = useMutationState({
     filters: {
-      mutationKey: ['message-action', accountId, folder],
+      mutationKey: ['message-action', accountId, folder, 'remove'],
       status: 'pending',
     },
     select: (m) => (m.state.variables as { uid: number } | undefined)?.uid,
@@ -224,11 +227,11 @@ export function useMessageMutations(accountId: string, folder: string) {
     qc.setQueryData(foldersKey, ctx.prevFolders);
   };
 
-  // Refetch authoritative server state, but only once the LAST destructive
-  // action settles — debounced so a burst of archives triggers a single refetch
-  // instead of one per action. Cancelling first discards any stray in-flight
-  // list read (e.g. issued just before polling paused) so it can't overwrite the
-  // fresh result and briefly resurrect a removed message.
+  // Refetch authoritative server state, but only once the LAST message action
+  // settles — debounced so a burst of actions triggers a single refetch instead
+  // of one per action. Cancelling first discards any stray in-flight list read
+  // (e.g. issued just before polling paused) so it can't overwrite the fresh
+  // result and briefly restore stale state.
   const invalidateAll = () => {
     if (settleTimer.current) clearTimeout(settleTimer.current);
     settleTimer.current = setTimeout(() => {
@@ -267,10 +270,14 @@ export function useMessageMutations(accountId: string, folder: string) {
     alert((err as Error).message);
   };
 
-  const actionKey = ['message-action', accountId, folder];
+  // Removals share one key; the read-toggle uses a sibling key. Both live under
+  // the ['message-action', accountId, folder] prefix so polling pauses for
+  // either, but only removals ('remove') are filtered out of the list.
+  const removeKey = ['message-action', accountId, folder, 'remove'];
+  const readKey = ['message-action', accountId, folder, 'read'];
 
   const move = useMutation({
-    mutationKey: actionKey,
+    mutationKey: removeKey,
     mutationFn: (v: { uid: number; target: string }) =>
       api.move(accountId, folder, v.uid, v.target),
     onMutate: (v) => optimisticRemove(v.uid),
@@ -279,7 +286,7 @@ export function useMessageMutations(accountId: string, folder: string) {
   });
 
   const archive = useMutation({
-    mutationKey: actionKey,
+    mutationKey: removeKey,
     mutationFn: (v: { uid: number }) => api.archive(accountId, folder, v.uid),
     onMutate: (v) => optimisticRemove(v.uid),
     onError: (e, _v, ctx) => onError(e, ctx),
@@ -287,7 +294,7 @@ export function useMessageMutations(accountId: string, folder: string) {
   });
 
   const remove = useMutation({
-    mutationKey: actionKey,
+    mutationKey: removeKey,
     mutationFn: (v: { uid: number; hard?: boolean }) =>
       api.remove(accountId, folder, v.uid, v.hard ?? false),
     onMutate: (v) => optimisticRemove(v.uid),
@@ -296,6 +303,7 @@ export function useMessageMutations(accountId: string, folder: string) {
   });
 
   const setRead = useMutation({
+    mutationKey: readKey,
     mutationFn: (v: { uid: number; seen: boolean }) =>
       api.setRead(accountId, folder, v.uid, v.seen),
     onMutate: async (v): Promise<ActionCtx> => {
@@ -319,10 +327,9 @@ export function useMessageMutations(accountId: string, folder: string) {
       return { prevList, prevFolders };
     },
     onError: (e, _v, ctx) => onError(e, ctx),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: listKey });
-      qc.invalidateQueries({ queryKey: foldersKey });
-    },
+    // Same debounced, cancel-guarded refetch as removals so a poll that raced
+    // the \Seen flag update can't resolve late and flip the row back.
+    onSettled: invalidateAll,
   });
 
   return { move, archive, remove, setRead };
