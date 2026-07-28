@@ -28,9 +28,11 @@ accountsRouter.post('/', async (req, res) => {
     const account = await createAccount(parsed.data);
     res.status(201).json(account);
   } catch (err) {
+    // ImapFlow puts the actual server response in err.response; err.message is just "Command failed".
+    const detail = (err as any).response ?? (err as Error).message;
     res.status(400).json({
       error: 'Could not connect with those IMAP credentials',
-      detail: (err as Error).message,
+      detail,
     });
   }
 });

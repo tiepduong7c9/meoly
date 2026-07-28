@@ -12,6 +12,7 @@ import { generateURI } from 'otplib';
 import { authRouter } from './routes/auth.js';
 import { requireAuth } from './middleware/requireAuth.js';
 import { accountsRouter } from './routes/accounts.js';
+import { oauthCallbackRouter, oauthStartRouter } from './routes/oauth.js';
 import { foldersRouter } from './routes/folders.js';
 import { messagesRouter, HttpError } from './routes/messages.js';
 import { aiRouter } from './routes/ai.js';
@@ -36,9 +37,15 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRouter);
 
+// The OAuth callback is a top-level browser redirect from Microsoft and carries
+// no Bearer token; it is mounted before requireAuth and secured by the single-
+// use `state` issued from the authed /start route.
+app.use('/api/oauth', oauthCallbackRouter);
+
 // Scope auth to API routes only — static SPA files are served without a token.
 app.use('/api', requireAuth);
 
+app.use('/api/oauth', oauthStartRouter);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/accounts/:id/folders', foldersRouter);
 app.use('/api/accounts/:id/messages', messagesRouter);

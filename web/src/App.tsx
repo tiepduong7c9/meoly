@@ -13,6 +13,19 @@ type View = 'mail' | 'review';
 
 function useAuthState() {
   const [authed, setAuthed] = useState(() => !!getToken());
+  // null = still checking whether the server requires TOTP auth.
+  const [authRequired, setAuthRequired] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // When TOTP auth is disabled server-side, skip the login screen entirely.
+    api
+      .authStatus()
+      .then((s) => {
+        setAuthRequired(s.enabled);
+        if (!s.enabled) setAuthed(true);
+      })
+      .catch(() => setAuthRequired(true)); // on error, be safe and require auth
+  }, []);
 
   useEffect(() => {
     const onUnauthenticated = () => setAuthed(false);
@@ -29,16 +42,18 @@ function useAuthState() {
   }, []);
 
   const logout = () => {
+    if (!authRequired) return; // nothing to log out of when auth is disabled
     clearToken();
     setAuthed(false);
     api.logout().catch(() => {});
   };
 
-  return { authed, login: () => setAuthed(true), logout };
+  return { authed, ready: authRequired !== null, login: () => setAuthed(true), logout };
 }
 
 export function App() {
-  const { authed, login, logout } = useAuthState();
+  const { authed, ready, login, logout } = useAuthState();
+  if (!ready) return null; // brief: waiting on auth-status check
   if (!authed) return <LoginPage onLogin={login} />;
   return <AuthedApp onLogout={logout} />;
 }

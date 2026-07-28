@@ -8,3 +8,6 @@ data/
 .env.local
 npm-debug.log*
 .DS_Store
+
+# Local dev TLS certs (self-signed)
+web/certs/

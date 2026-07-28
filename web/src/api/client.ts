@@ -63,6 +63,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 const q = (folder: string) => `folder=${encodeURIComponent(folder)}`;
 
 export const api = {
+  authStatus: () => request<{ enabled: boolean }>('/api/auth/status'),
+
   login: (code: string) =>
     request<{ token: string }>('/api/auth/login', {
       method: 'POST',
@@ -81,6 +83,11 @@ export const api = {
 
   deleteAccount: (id: string) =>
     request<void>(`/api/accounts/${id}`, { method: 'DELETE' }),
+
+  // Returns the Microsoft authorize URL to open in a popup; the account is
+  // created server-side when Microsoft redirects to the callback.
+  oauthStart: (provider: 'microsoft') =>
+    request<{ url: string }>(`/api/oauth/${provider}/start`),
 
   syncAccount: (id: string) =>
     request<{ ok: true }>(`/api/accounts/${id}/sync`, { method: 'POST' }),

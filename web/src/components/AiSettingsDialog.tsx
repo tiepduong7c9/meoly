@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { Button } from '@astryxdesign/core/Button';
+import { btnPrimary, btnSecondary } from '../lib/buttons';
 import type { Account, AiAction, AiGlobalSettingsPatch } from '../api/types';
 import {
   useAiGlobalSettings,
@@ -240,13 +240,12 @@ function GlobalForm({ onClose }: { onClose: () => void }) {
       {update.isError && <p className="text-sm text-red-600">{(update.error as Error).message}</p>}
 
       <div className="flex justify-end gap-2 pt-1">
-        <Button label="Cancel" variant="secondary" onClick={onClose} />
-        <Button
-          label={update.isPending ? 'Saving…' : 'Save'}
-          variant="primary"
-          onClick={save}
-          isDisabled={update.isPending}
-        />
+        <button type="button" className={btnSecondary} onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className={btnPrimary} onClick={save} disabled={update.isPending}>
+          {update.isPending ? 'Saving…' : 'Save'}
+        </button>
       </div>
     </div>
   );
@@ -369,13 +368,12 @@ function AccountForm({ accountId, onClose }: { accountId: string; onClose: () =>
       {update.isError && <p className="text-sm text-red-600">{(update.error as Error).message}</p>}
 
       <div className="flex justify-end gap-2 pt-1">
-        <Button label="Cancel" variant="secondary" onClick={onClose} />
-        <Button
-          label={update.isPending ? 'Saving…' : 'Save'}
-          variant="primary"
-          onClick={save}
-          isDisabled={update.isPending}
-        />
+        <button type="button" className={btnSecondary} onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className={btnPrimary} onClick={save} disabled={update.isPending}>
+          {update.isPending ? 'Saving…' : 'Save'}
+        </button>
       </div>
     </div>
   );

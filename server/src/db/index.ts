@@ -151,5 +151,10 @@ ensureColumn('folders', 'last_synced_at', 'last_synced_at TEXT');
 ensureColumn('folders', 'sync_status', "sync_status TEXT NOT NULL DEFAULT 'idle'");
 ensureColumn('folders', 'sync_error', 'sync_error TEXT');
 
+// OAuth accounts store an encrypted refresh token in secret_enc instead of a
+// password; auth_type distinguishes the two so pool.ts knows how to connect.
+ensureColumn('accounts', 'auth_type', "auth_type TEXT NOT NULL DEFAULT 'password'");
+ensureColumn('accounts', 'oauth_provider', 'oauth_provider TEXT');
+
 // Any folder left 'syncing' from a previous run is stale on boot.
 db.prepare("UPDATE folders SET sync_status = 'idle' WHERE sync_status = 'syncing'").run();

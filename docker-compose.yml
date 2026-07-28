@@ -25,6 +25,15 @@ services:
       AI_AUTO_APPLY_ACTIONS: ${AI_AUTO_APPLY_ACTIONS:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # Microsoft OAuth for Outlook / Office 365 (optional). REDIRECT_URI must
+      # exactly match the Azure app registration, e.g.
+      # https://your-domain/api/oauth/microsoft/callback. Leave it blank to
+      # derive it from the request (needs the proxy to send X-Forwarded-Proto
+      # and X-Forwarded-Host).
+      MS_OAUTH_CLIENT_ID: ${MS_OAUTH_CLIENT_ID:-}
+      MS_OAUTH_CLIENT_SECRET: ${MS_OAUTH_CLIENT_SECRET:-}
+      MS_OAUTH_TENANT: ${MS_OAUTH_TENANT:-common}
+      MS_OAUTH_REDIRECT_URI: ${MS_OAUTH_REDIRECT_URI:-}
     volumes:
       - ./data:/data
     restart: unless-stopped

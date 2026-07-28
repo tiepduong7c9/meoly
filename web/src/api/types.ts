@@ -5,6 +5,7 @@ export interface Account {
   port: number;
   secure: boolean;
   username: string;
+  authType: 'password' | 'xoauth2';
   createdAt: string;
 }
 
