@@ -5,8 +5,11 @@ import { getAccessToken } from './oauth/microsoft.js';
 import type { AccountRow } from '../types.js';
 
 interface Pooled {
-  client: ImapFlow;
-  connecting: Promise<void> | null;
+  // Set once the client is built + connected; null while a build is in flight.
+  client: ImapFlow | null;
+  // The in-flight (or resolved) build+connect. Registered synchronously so a
+  // concurrent getClient() waits on it instead of opening a second connection.
+  ready: Promise<ImapFlow>;
 }
 
 const pool = new Map<string, Pooled>();
@@ -51,40 +54,54 @@ async function build(account: AccountRow): Promise<ImapFlow> {
 
 /** Get a connected ImapFlow client for the account, reusing the pooled one. */
 export async function getClient(accountId: string): Promise<ImapFlow> {
-  let entry = pool.get(accountId);
-
-  if (entry && entry.client.usable) {
-    if (entry.connecting) await entry.connecting;
-    return entry.client;
-  }
-
-  // Stale/absent — (re)create.
-  if (entry && !entry.client.usable) {
-    try {
-      await entry.client.logout();
-    } catch {
-      /* ignore */
+  const existing = pool.get(accountId);
+  if (existing) {
+    if (!existing.client) {
+      // A build is still in flight — wait for it rather than starting a second.
+      try {
+        const client = await existing.ready;
+        if (client.usable) return client;
+      } catch {
+        /* build failed — fall through to recreate */
+      }
+    } else if (existing.client.usable) {
+      return existing.client;
     }
-    pool.delete(accountId);
+    // Stale/unusable — drop it (and log out if we still hold one).
+    if (pool.get(accountId) === existing) pool.delete(accountId);
+    if (existing.client && !existing.client.usable) {
+      try {
+        await existing.client.logout();
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
-  const client = await build(loadAccount(accountId));
-  const dropFromPool = () => {
-    if (pool.get(accountId)?.client === client) pool.delete(accountId);
-  };
-  client.on('error', dropFromPool);
-  client.on('close', dropFromPool);
-
-  entry = { client, connecting: client.connect() };
+  // Register the in-flight build synchronously (no await before pool.set) so a
+  // concurrent caller finds this entry and awaits `ready` instead of opening a
+  // second, unpooled connection that would leak.
+  const account = loadAccount(accountId);
+  const entry = { client: null } as Pooled;
+  entry.ready = (async () => {
+    const client = await build(account);
+    const dropFromPool = () => {
+      if (pool.get(accountId)?.client === client) pool.delete(accountId);
+    };
+    client.on('error', dropFromPool);
+    client.on('close', dropFromPool);
+    await client.connect();
+    entry.client = client;
+    return client;
+  })();
   pool.set(accountId, entry);
+
   try {
-    await entry.connecting;
-    entry.connecting = null;
+    return await entry.ready;
   } catch (err) {
-    pool.delete(accountId);
+    if (pool.get(accountId) === entry) pool.delete(accountId);
     throw err;
   }
-  return client;
 }
 
 /**
@@ -149,7 +166,9 @@ export async function closeClient(accountId: string): Promise<void> {
   if (!entry) return;
   pool.delete(accountId);
   try {
-    await entry.client.logout();
+    // May still be building — resolve `ready` to get the client before logout.
+    const client = entry.client ?? (await entry.ready);
+    await client.logout();
   } catch {
     /* ignore */
   }

@@ -57,8 +57,17 @@ export function AddAccountDialog({ onClose }: { onClose: () => void }) {
       setOauthBusy(false);
       return;
     }
+    // window.open returns null when blocked — recover instead of hanging.
+    if (!popup) {
+      setOauthError('Popup was blocked — allow popups for this site and try again.');
+      setOauthBusy(false);
+      return;
+    }
 
     const handler = (ev: MessageEvent) => {
+      // The callback posts from the app's own origin; ignore anything else so a
+      // forged message can't dismiss the dialog.
+      if (ev.origin !== window.location.origin) return;
       if (!ev.data || ev.data.type !== 'meoly:oauth') return;
       window.removeEventListener('message', handler);
       clearInterval(timer);

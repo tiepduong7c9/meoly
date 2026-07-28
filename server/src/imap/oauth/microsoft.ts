@@ -153,6 +153,8 @@ export async function exchangeCode(code: string, state: string): Promise<Exchang
 
 // --- Access-token cache: accountId -> { accessToken, expiresAt } ---
 const tokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
+// In-flight refreshes, deduped per account (see getAccessToken).
+const refreshing = new Map<string, Promise<string>>();
 // Refresh a minute early so a token never expires mid-operation.
 const EXPIRY_SKEW_MS = 60_000;
 
@@ -171,20 +173,35 @@ export async function getAccessToken(
     return cached.accessToken;
   }
 
-  const data = await tokenRequest({
-    client_id: env.microsoftOAuth.clientId,
-    client_secret: env.microsoftOAuth.clientSecret,
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-    scope: SCOPES,
-  });
+  // Dedup concurrent refreshes: two callers racing a cache miss would otherwise
+  // both rotate the refresh token, orphaning one (and risking invalid_grant in
+  // tenants with refresh-token-family revocation).
+  const inFlight = refreshing.get(accountId);
+  if (inFlight) return inFlight;
 
-  const expiresAt = Date.now() + data.expires_in * 1000;
-  tokenCache.set(accountId, { accessToken: data.access_token, expiresAt });
-  if (data.refresh_token && data.refresh_token !== refreshToken) {
-    onRotate(data.refresh_token);
+  const promise = (async () => {
+    const data = await tokenRequest({
+      client_id: env.microsoftOAuth.clientId,
+      client_secret: env.microsoftOAuth.clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      scope: SCOPES,
+    });
+
+    const expiresAt = Date.now() + data.expires_in * 1000;
+    tokenCache.set(accountId, { accessToken: data.access_token, expiresAt });
+    if (data.refresh_token && data.refresh_token !== refreshToken) {
+      onRotate(data.refresh_token);
+    }
+    return data.access_token;
+  })();
+
+  refreshing.set(accountId, promise);
+  try {
+    return await promise;
+  } finally {
+    refreshing.delete(accountId);
   }
-  return data.access_token;
 }
 
 /** Drop any cached access token for an account (e.g. on delete). */

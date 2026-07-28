@@ -25,14 +25,21 @@ function escapeHtml(s: string): string {
 
 /** Popup page: notify the opener of the outcome, then close. */
 function resultPage(ok: boolean, detail: string): string {
-  const payload = JSON.stringify({ type: 'meoly:oauth', provider: 'microsoft', ok, detail });
+  // Escape "<" so a </script> (or any HTML) in `detail` cannot break out of the
+  // inline script — `detail` can carry attacker-supplied provider error text.
+  const payload = JSON.stringify({ type: 'meoly:oauth', provider: 'microsoft', ok, detail }).replace(
+    /</g,
+    '\\u003c',
+  );
   const heading = ok ? 'Mailbox connected' : 'Sign-in failed';
+  // The callback is served same-origin as the app (proxied), so target the
+  // opener's own origin instead of broadcasting the result to '*'.
   return `<!doctype html><html><head><meta charset="utf-8"><title>${heading}</title>
 <style>body{font-family:system-ui,sans-serif;padding:2rem;text-align:center;color:#333}</style></head>
 <body><h3>${escapeHtml(heading)}</h3><p>${escapeHtml(detail)}</p>
 <p style="color:#888">You can close this window.</p>
 <script>
-  try { if (window.opener) window.opener.postMessage(${payload}, '*'); } catch (e) {}
+  try { if (window.opener) window.opener.postMessage(${payload}, window.location.origin); } catch (e) {}
   setTimeout(function(){ window.close(); }, ${ok ? 800 : 4000});
 </script></body></html>`;
 }

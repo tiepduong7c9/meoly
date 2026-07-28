@@ -93,6 +93,9 @@ export function createOAuthAccount(input: NewOAuthAccount): AccountPublic {
       input.secure ? 1 : 0,
       existing.id,
     );
+    // Drop the cached access token so the next connection mints one from the
+    // new refresh token rather than serving the stale (up to ~1h) cached token.
+    clearTokenCache(existing.id);
     const row = db.prepare('SELECT * FROM accounts WHERE id = ?').get(existing.id) as AccountRow;
     scheduleAccount(existing.id);
     return toPublic(row);
