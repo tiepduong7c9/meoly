@@ -30,6 +30,7 @@ export interface FolderRow {
   path: string;
   name: string;
   special_use: string | null;
+  selectable: number;
   uidvalidity: number | null;
   uidnext: number | null;
   unseen: number;

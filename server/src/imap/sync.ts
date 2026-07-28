@@ -47,11 +47,12 @@ function hasAttachments(node: unknown): boolean {
 // --- prepared statements -----------------------------------------------------
 
 const upsertFolderMeta = db.prepare(`
-  INSERT INTO folders (account_id, path, name, special_use, uidvalidity, uidnext, unseen, total)
-  VALUES (@account_id, @path, @name, @special_use, @uidvalidity, @uidnext, @unseen, @total)
+  INSERT INTO folders (account_id, path, name, special_use, selectable, uidvalidity, uidnext, unseen, total)
+  VALUES (@account_id, @path, @name, @special_use, @selectable, @uidvalidity, @uidnext, @unseen, @total)
   ON CONFLICT(account_id, path) DO UPDATE SET
     name = excluded.name,
     special_use = excluded.special_use,
+    selectable = excluded.selectable,
     uidvalidity = excluded.uidvalidity,
     uidnext = excluded.uidnext,
     unseen = excluded.unseen,
@@ -108,29 +109,37 @@ export async function syncFolders(accountId: string): Promise<void> {
   const boxes = await client.list();
 
   for (const box of boxes) {
+    // \Noselect / \NonExistent boxes (e.g. Gmail's "[Gmail]" container) hold no
+    // messages and can't be opened; record them as non-selectable and skip
+    // STATUS so sync/UI can filter them out instead of erroring on open.
+    const selectable = !(box.flags?.has('\\Noselect') || box.flags?.has('\\NonExistent'));
+
     let unseen = 0;
     let total = 0;
     let uidvalidity: number | null = null;
     let uidnext: number | null = null;
-    try {
-      const status = await client.status(box.path, {
-        messages: true,
-        unseen: true,
-        uidNext: true,
-        uidValidity: true,
-      });
-      total = status.messages ?? 0;
-      unseen = status.unseen ?? 0;
-      uidnext = status.uidNext ?? null;
-      uidvalidity = status.uidValidity ? Number(status.uidValidity) : null;
-    } catch {
-      // \Noselect container folders can't be STATUS'd.
+    if (selectable) {
+      try {
+        const status = await client.status(box.path, {
+          messages: true,
+          unseen: true,
+          uidNext: true,
+          uidValidity: true,
+        });
+        total = status.messages ?? 0;
+        unseen = status.unseen ?? 0;
+        uidnext = status.uidNext ?? null;
+        uidvalidity = status.uidValidity ? Number(status.uidValidity) : null;
+      } catch {
+        // Some servers advertise a box as selectable but still reject STATUS.
+      }
     }
     upsertFolderMeta.run({
       account_id: accountId,
       path: box.path,
       name: box.name,
       special_use: box.specialUse ?? null,
+      selectable: selectable ? 1 : 0,
       uidvalidity,
       uidnext,
       unseen,
