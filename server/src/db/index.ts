@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS folders (
   path           TEXT NOT NULL,
   name           TEXT NOT NULL,
   special_use    TEXT,
+  selectable     INTEGER NOT NULL DEFAULT 1,
   uidvalidity    INTEGER,
   uidnext        INTEGER,
   unseen         INTEGER NOT NULL DEFAULT 0,
@@ -147,6 +148,7 @@ function ensureColumn(table: string, column: string, definition: string): void {
   }
 }
 
+ensureColumn('folders', 'selectable', 'selectable INTEGER NOT NULL DEFAULT 1');
 ensureColumn('folders', 'last_synced_at', 'last_synced_at TEXT');
 ensureColumn('folders', 'sync_status', "sync_status TEXT NOT NULL DEFAULT 'idle'");
 ensureColumn('folders', 'sync_error', 'sync_error TEXT');

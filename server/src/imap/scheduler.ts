@@ -13,11 +13,11 @@ async function syncAccountOnce(accountId: string): Promise<void> {
   try {
     await syncFolders(accountId);
 
-    // INBOX first, then the rest. \Noselect containers throw on open and are
-    // recorded as errored, which is fine — the loop continues.
+    // INBOX first, then the rest. Non-selectable containers (e.g. Gmail's
+    // "[Gmail]") can't be opened, so they're excluded from the sync loop.
     const folders = db
       .prepare(
-        `SELECT path FROM folders WHERE account_id = ?
+        `SELECT path FROM folders WHERE account_id = ? AND selectable = 1
          ORDER BY (special_use = '\\Inbox') DESC, (path = 'INBOX') DESC, path ASC`,
       )
       .all(accountId) as Array<{ path: string }>;

@@ -14,8 +14,10 @@ export interface FolderView {
 }
 
 function readFolders(accountId: string): FolderView[] {
+  // Non-selectable containers (e.g. Gmail's "[Gmail]") hold no mail and can't
+  // be opened, so they're hidden from the client entirely.
   const rows = db
-    .prepare('SELECT * FROM folders WHERE account_id = ? ORDER BY path ASC')
+    .prepare('SELECT * FROM folders WHERE account_id = ? AND selectable = 1 ORDER BY path ASC')
     .all(accountId) as FolderRow[];
   return rows.map((r) => ({
     path: r.path,
