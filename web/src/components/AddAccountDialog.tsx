@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { Button } from '@astryxdesign/core/Button';
 import { useQueryClient } from '@tanstack/react-query';
+import { btnPrimary, btnSecondary } from '../lib/buttons';
 import { api } from '../api/client';
 import { useAddAccount } from '../hooks';
 import { PROVIDER_PRESETS } from '../presets';
@@ -132,13 +132,17 @@ export function AddAccountDialog({ onClose }: { onClose: () => void }) {
             </p>
             {oauthError && <p className="text-sm text-red-600">{oauthError}</p>}
             <div className="flex justify-end gap-2 pt-2">
-              <Button label="Cancel" variant="secondary" onClick={onClose} />
-              <Button
-                label={oauthBusy ? 'Waiting for Microsoft…' : 'Sign in with Microsoft'}
-                variant="primary"
+              <button type="button" className={btnSecondary} onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={btnPrimary}
                 onClick={signInWithMicrosoft}
-                isDisabled={oauthBusy}
-              />
+                disabled={oauthBusy}
+              >
+                {oauthBusy ? 'Waiting for Microsoft…' : 'Sign in with Microsoft'}
+              </button>
             </div>
           </div>
         ) : (
@@ -200,13 +204,12 @@ export function AddAccountDialog({ onClose }: { onClose: () => void }) {
             )}
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button label="Cancel" variant="secondary" onClick={onClose} />
-              <Button
-                label={addAccount.isPending ? 'Connecting…' : 'Add mailbox'}
-                variant="primary"
-                type="submit"
-                isDisabled={addAccount.isPending}
-              />
+              <button type="button" className={btnSecondary} onClick={onClose}>
+                Cancel
+              </button>
+              <button type="submit" className={btnPrimary} disabled={addAccount.isPending}>
+                {addAccount.isPending ? 'Connecting…' : 'Add mailbox'}
+              </button>
             </div>
           </form>
         )}
