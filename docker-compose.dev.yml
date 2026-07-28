@@ -11,6 +11,11 @@ services:
       DATA_DIR: /data
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env (openssl rand -base64 32)}
       NODE_ENV: development
+      # Microsoft OAuth for Outlook (optional — leave blank to disable the button)
+      MS_OAUTH_CLIENT_ID: ${MS_OAUTH_CLIENT_ID:-}
+      MS_OAUTH_CLIENT_SECRET: ${MS_OAUTH_CLIENT_SECRET:-}
+      MS_OAUTH_TENANT: ${MS_OAUTH_TENANT:-common}
+      MS_OAUTH_REDIRECT_URI: ${MS_OAUTH_REDIRECT_URI:-https://localhost:5173/api/oauth/microsoft/callback}
     volumes:
       - ./:/app # live source for hot reload
       # Anonymous volumes keep the image's installed node_modules (with the

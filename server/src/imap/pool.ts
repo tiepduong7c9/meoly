@@ -1,6 +1,7 @@
 import { ImapFlow, type MailboxLockObject } from 'imapflow';
 import { db } from '../db/index.js';
-import { decrypt } from '../crypto/secrets.js';
+import { decrypt, encrypt } from '../crypto/secrets.js';
+import { getAccessToken } from './oauth/microsoft.js';
 import type { AccountRow } from '../types.js';
 
 interface Pooled {
@@ -18,12 +19,30 @@ function loadAccount(accountId: string): AccountRow {
   return row;
 }
 
-function build(account: AccountRow): ImapFlow {
+async function buildAuth(
+  account: AccountRow,
+): Promise<{ user: string; pass?: string; accessToken?: string }> {
+  if (account.auth_type === 'xoauth2') {
+    // secret_enc holds the refresh token; exchange it for an access token and
+    // persist any rotated refresh token back to the DB.
+    const refreshToken = decrypt(account.secret_enc);
+    const accessToken = await getAccessToken(account.id, refreshToken, (rotated) => {
+      db.prepare('UPDATE accounts SET secret_enc = ? WHERE id = ?').run(
+        encrypt(rotated),
+        account.id,
+      );
+    });
+    return { user: account.username, accessToken };
+  }
+  return { user: account.username, pass: decrypt(account.secret_enc) };
+}
+
+async function build(account: AccountRow): Promise<ImapFlow> {
   return new ImapFlow({
     host: account.host,
     port: account.port,
     secure: account.secure === 1,
-    auth: { user: account.username, pass: decrypt(account.secret_enc) },
+    auth: await buildAuth(account),
     logger: false,
     // Keep the single connection alive between requests.
     maxIdleTime: 60_000,
@@ -49,11 +68,12 @@ export async function getClient(accountId: string): Promise<ImapFlow> {
     pool.delete(accountId);
   }
 
-  const client = build(loadAccount(accountId));
-  client.on('error', () => {
-    // Drop from pool so the next call reconnects.
+  const client = await build(loadAccount(accountId));
+  const dropFromPool = () => {
     if (pool.get(accountId)?.client === client) pool.delete(accountId);
-  });
+  };
+  client.on('error', dropFromPool);
+  client.on('close', dropFromPool);
 
   entry = { client, connecting: client.connect() };
   pool.set(accountId, entry);
@@ -98,6 +118,25 @@ export async function testConnection(opts: {
     port: opts.port,
     secure: opts.secure,
     auth: { user: opts.user, pass: opts.pass },
+    logger: false,
+  });
+  await client.connect();
+  await client.logout();
+}
+
+/** Verify an XOAUTH2 access token authenticates before persisting the account. */
+export async function testOAuthConnection(opts: {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  accessToken: string;
+}): Promise<void> {
+  const client = new ImapFlow({
+    host: opts.host,
+    port: opts.port,
+    secure: opts.secure,
+    auth: { user: opts.user, accessToken: opts.accessToken },
     logger: false,
   });
   await client.connect();

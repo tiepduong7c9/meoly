@@ -1,3 +1,5 @@
+export type AuthType = 'password' | 'xoauth2';
+
 export interface AccountRow {
   id: string;
   label: string;
@@ -5,7 +7,9 @@ export interface AccountRow {
   port: number;
   secure: number; // 0 | 1
   username: string;
-  secret_enc: string;
+  secret_enc: string; // encrypted app password, or refresh token when xoauth2
+  auth_type: AuthType;
+  oauth_provider: string | null;
   created_at: string;
 }
 
@@ -17,6 +21,7 @@ export interface AccountPublic {
   port: number;
   secure: boolean;
   username: string;
+  authType: AuthType;
   createdAt: string;
 }
 

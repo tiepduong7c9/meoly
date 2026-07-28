@@ -110,6 +110,23 @@ export const env = {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
     chatId: process.env.TELEGRAM_CHAT_ID ?? '',
   },
+
+  /**
+   * Microsoft OAuth2 (XOAUTH2) for Outlook/Office 365 IMAP. Enabled only when a
+   * client id + secret are configured. `tenant` = 'common' supports both
+   * personal and org accounts. `redirectUri` should be set explicitly in prod
+   * (must exactly match the Azure app registration); when blank it is derived
+   * from the incoming request, honoring reverse-proxy forwarding headers.
+   */
+  microsoftOAuth: {
+    get enabled(): boolean {
+      return !!process.env.MS_OAUTH_CLIENT_ID && !!process.env.MS_OAUTH_CLIENT_SECRET;
+    },
+    clientId: process.env.MS_OAUTH_CLIENT_ID ?? '',
+    clientSecret: process.env.MS_OAUTH_CLIENT_SECRET ?? '',
+    tenant: process.env.MS_OAUTH_TENANT ?? 'common',
+    redirectUri: process.env.MS_OAUTH_REDIRECT_URI ?? '',
+  },
 } as const;
 
 function isProd(): boolean {

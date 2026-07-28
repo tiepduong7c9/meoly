@@ -11,6 +11,11 @@ import {
 
 export const authRouter = Router();
 
+// Public: lets the SPA skip the login screen when TOTP auth isn't configured.
+authRouter.get('/status', (_req, res) => {
+  res.json({ enabled: env.auth.enabled });
+});
+
 authRouter.post('/login', async (req, res) => {
   if (!env.auth.enabled) {
     res.status(404).json({ error: 'Auth not enabled' });
