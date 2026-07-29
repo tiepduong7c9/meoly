@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Mail } from 'lucide-react';
+import { Mail, LogOut } from 'lucide-react';
 import { AccountSidebar } from './components/AccountSidebar';
-import { MessageList } from './components/MessageList';
+import { MessageList, FolderSyncStatus } from './components/MessageList';
 import { MessageView } from './components/MessageView';
 import { AddAccountDialog } from './components/AddAccountDialog';
 import { ReviewPanel } from './components/ReviewPanel';
@@ -95,7 +95,8 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
   };
 
   return (
-    <div className="flex h-full w-full text-neutral-900">
+    <div className="flex h-full w-full flex-col text-neutral-900">
+      <div className="flex min-h-0 flex-1">
       <AccountSidebar
         accounts={accounts}
         selectedAccount={accountId}
@@ -111,7 +112,6 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
         }}
         onSelectReview={() => setView('review')}
         onAddAccount={() => setShowAdd(true)}
-        onLogout={onLogout}
       />
 
       {view === 'review' ? (
@@ -143,6 +143,24 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
       )}
 
       {showAdd && <AddAccountDialog onClose={() => setShowAdd(false)} />}
+      </div>
+
+      <div className="flex shrink-0 items-center border-t border-neutral-200 bg-neutral-50">
+        {/* Left slot — matches sidebar width */}
+        <div className="flex w-64 shrink-0 items-center px-3 py-1.5">
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-700"
+            >
+              <LogOut size={13} />
+              Sign out
+            </button>
+          )}
+        </div>
+        {/* Right slot — aligns with message list column */}
+        {accountId && folder && <FolderSyncStatus accountId={accountId} folder={folder} />}
+      </div>
     </div>
   );
 }

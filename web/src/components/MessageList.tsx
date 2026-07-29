@@ -77,7 +77,14 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
     <div className="flex h-full w-96 shrink-0 flex-col border-r border-neutral-200">
       <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-2">
         <div className="flex items-baseline gap-2 min-w-0">
-          <span className="truncate text-sm font-semibold">{folder}</span>
+          <span className="truncate text-sm font-semibold">
+            {folder.split('/').map((part, i) => (
+              <span key={i}>
+                {i > 0 && <span className="mx-1 font-normal text-neutral-400">›</span>}
+                {part}
+              </span>
+            ))}
+          </span>
           {meta && (
             <span className="shrink-0 text-xs font-normal text-neutral-400">
               {meta.total.toLocaleString()} {meta.total === 1 ? 'message' : 'messages'}
@@ -85,28 +92,14 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {!syncing && (
-            <span
-              className={`text-xs ${meta?.syncStatus === 'error' || isError ? 'text-red-500' : 'text-neutral-400'}`}
-              title={meta?.syncError ?? undefined}
-            >
-              {meta?.syncStatus === 'error' || isError
-                ? 'Sync failed'
-                : lastSyncedMs
-                ? relativeTime(lastSyncedMs)
-                : 'Not synced'}
-            </span>
-          )}
-          <button
-            onClick={refresh}
-            disabled={syncing}
-            className={`rounded p-1.5 disabled:opacity-50 ${meta?.syncStatus === 'error' || isError ? 'text-red-500 hover:bg-red-50' : 'hover:bg-neutral-100'}`}
-            title="Sync now"
-          >
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-          </button>
-        </div>
+        <button
+          onClick={refresh}
+          disabled={syncing}
+          className="rounded p-1.5 hover:bg-neutral-100 disabled:opacity-50"
+          title="Sync now"
+        >
+          <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -139,6 +132,50 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
           </button>
         ))}
       </div>
+
+    </div>
+  );
+}
+
+// Exported so App.tsx can render it in a full-width bottom bar.
+export function FolderSyncStatus({
+  accountId,
+  folder,
+}: {
+  accountId: string;
+  folder: string;
+}) {
+  const { isFetching, isError } = useFilteredMessages(accountId, folder);
+  const { data: folders } = useFolders(accountId);
+  const meta = folders?.find((f) => f.path === folder);
+  const syncing = meta?.syncStatus === 'syncing' || isFetching;
+  const lastSyncedMs = serverTimeToMs(meta?.lastSyncedAt ?? null);
+
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 20_000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="flex flex-1 items-center gap-1.5 px-4 py-1.5">
+      {syncing ? (
+        <>
+          <RefreshCw size={11} className="animate-spin text-neutral-400" />
+          <span className="text-xs text-neutral-400">Syncing…</span>
+        </>
+      ) : meta?.syncStatus === 'error' || isError ? (
+        <>
+          <AlertCircle size={11} className="text-red-500" />
+          <span className="text-xs text-red-500" title={meta?.syncError ?? undefined}>
+            Sync failed
+          </span>
+        </>
+      ) : (
+        <span className="text-xs text-neutral-400">
+          {lastSyncedMs ? `Synced ${relativeTime(lastSyncedMs)}` : 'Not synced yet'}
+        </span>
+      )}
     </div>
   );
 }
