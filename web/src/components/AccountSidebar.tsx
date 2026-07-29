@@ -1,4 +1,4 @@
-import { Plus, Mail, Trash, RefreshCw, AlertCircle, Bot, LogOut } from 'lucide-react';
+import { Plus, Mail, Trash, RefreshCw, AlertCircle, Bot, ChevronRight } from 'lucide-react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import type { Account, Folder } from '../api/types';
 import { useAiStatus, useDeleteAccount, useFolders, useSyncAccount } from '../hooks';
@@ -13,7 +13,6 @@ interface Props {
   onSelectFolder: (path: string) => void;
   onSelectReview: () => void;
   onAddAccount: () => void;
-  onLogout?: () => void;
 }
 
 export function AccountSidebar({
@@ -25,7 +24,6 @@ export function AccountSidebar({
   onSelectFolder,
   onSelectReview,
   onAddAccount,
-  onLogout,
 }: Props) {
   const aiStatus = useAiStatus();
   const pending = aiStatus.data?.counts?.pending ?? 0;
@@ -87,20 +85,10 @@ export function AccountSidebar({
         ))}
       </div>
 
-      {onLogout && (
-        <div className="border-t border-neutral-200 px-2 py-2">
-          <button
-            onClick={onLogout}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-          >
-            <LogOut size={15} />
-            Sign out
-          </button>
-        </div>
-      )}
     </aside>
   );
 }
+
 
 function AccountBlock({
   account,
@@ -139,11 +127,17 @@ function AccountBlock({
     <div className="mb-2">
       <button
         onClick={onSelectAccount}
-        className={`group flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm font-medium ${
-          expanded ? 'bg-neutral-200' : 'hover:bg-neutral-100'
+        className={`group flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm font-semibold tracking-wide ${
+          expanded ? 'bg-neutral-800 text-white' : 'hover:bg-neutral-100'
         }`}
       >
-        <span className="truncate">{account.label}</span>
+        <span className="flex items-center gap-1.5 truncate">
+          <ChevronRight
+            size={13}
+            className={`shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90 text-white/60' : 'text-neutral-400'}`}
+          />
+          <span className="truncate">{account.label}</span>
+        </span>
         <span className="flex items-center gap-1">
           {syncing ? (
             <RefreshCw size={13} className="animate-spin text-neutral-400" aria-label="Syncing" />
@@ -209,7 +203,7 @@ function FolderRow({
       onClick={onSelect}
       title={folder.syncError ?? undefined}
       className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm ${
-        active ? 'bg-neutral-800 text-white' : 'hover:bg-neutral-100'
+        active ? 'bg-neutral-200 text-neutral-900' : 'hover:bg-neutral-100'
       }`}
     >
       <Icon size={15} className="shrink-0" />
@@ -217,7 +211,7 @@ function FolderRow({
       {syncing ? (
         <RefreshCw
           size={13}
-          className={`shrink-0 animate-spin ${active ? 'text-white/70' : 'text-neutral-400'}`}
+          className={`shrink-0 animate-spin text-neutral-400`}
           aria-label="Syncing"
         />
       ) : folder.syncStatus === 'error' ? (
@@ -226,7 +220,7 @@ function FolderRow({
         folder.unseen > 0 && (
           <span
             className={`rounded-full px-1.5 text-xs ${
-              active ? 'bg-white/20' : 'bg-neutral-200 text-neutral-700'
+              active ? 'bg-neutral-400/30 text-neutral-700' : 'bg-neutral-200 text-neutral-700'
             }`}
           >
             {folder.unseen}

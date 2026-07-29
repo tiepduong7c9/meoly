@@ -76,34 +76,21 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
   return (
     <div className="flex h-full w-96 shrink-0 flex-col border-r border-neutral-200">
       <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-2">
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2">
-            <span className="truncate text-sm font-semibold">{folder}</span>
-            {meta && (
-              <span className="shrink-0 text-xs font-normal text-neutral-400">
-                {meta.total.toLocaleString()} {meta.total === 1 ? 'message' : 'messages'}
-                {meta.unseen > 0 && ` · ${meta.unseen} unread`}
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="truncate text-sm font-semibold">
+            {folder.split('/').map((part, i) => (
+              <span key={i}>
+                {i > 0 && <span className="mx-1 font-normal text-neutral-400">›</span>}
+                {part}
               </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1 text-xs text-neutral-400">
-            {syncing ? (
-              <>
-                <RefreshCw size={11} className="animate-spin" /> Syncing…
-              </>
-            ) : meta?.syncStatus === 'error' || isError ? (
-              <span
-                className="flex items-center gap-1 text-red-500"
-                title={meta?.syncError ?? undefined}
-              >
-                <AlertCircle size={11} /> Sync failed
-              </span>
-            ) : lastSyncedMs ? (
-              <>Synced {relativeTime(lastSyncedMs)}</>
-            ) : (
-              'Not synced yet'
-            )}
-          </div>
+            ))}
+          </span>
+          {meta && (
+            <span className="shrink-0 text-xs font-normal text-neutral-400">
+              {meta.total.toLocaleString()} {meta.total === 1 ? 'message' : 'messages'}
+              {meta.unseen > 0 && ` · ${meta.unseen} unread`}
+            </span>
+          )}
         </div>
         <button
           onClick={refresh}
@@ -145,6 +132,50 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
           </button>
         ))}
       </div>
+
+    </div>
+  );
+}
+
+// Exported so App.tsx can render it in a full-width bottom bar.
+export function FolderSyncStatus({
+  accountId,
+  folder,
+}: {
+  accountId: string;
+  folder: string;
+}) {
+  const { isFetching, isError } = useFilteredMessages(accountId, folder);
+  const { data: folders } = useFolders(accountId);
+  const meta = folders?.find((f) => f.path === folder);
+  const syncing = meta?.syncStatus === 'syncing' || isFetching;
+  const lastSyncedMs = serverTimeToMs(meta?.lastSyncedAt ?? null);
+
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 20_000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="flex flex-1 items-center gap-1.5 px-4 py-1.5">
+      {syncing ? (
+        <>
+          <RefreshCw size={11} className="animate-spin text-neutral-400" />
+          <span className="text-xs text-neutral-400">Syncing…</span>
+        </>
+      ) : meta?.syncStatus === 'error' || isError ? (
+        <>
+          <AlertCircle size={11} className="text-red-500" />
+          <span className="text-xs text-red-500" title={meta?.syncError ?? undefined}>
+            Sync failed
+          </span>
+        </>
+      ) : (
+        <span className="text-xs text-neutral-400">
+          {lastSyncedMs ? `Synced ${relativeTime(lastSyncedMs)}` : 'Not synced yet'}
+        </span>
+      )}
     </div>
   );
 }
