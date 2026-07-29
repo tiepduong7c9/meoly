@@ -55,14 +55,6 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
   // Prefer the server's persistent sync state (survives reloads, reflects
   // background sync) over the client's in-session fetch state.
   const syncing = meta?.syncStatus === 'syncing' || isFetching;
-  const lastSyncedMs = serverTimeToMs(meta?.lastSyncedAt ?? null);
-
-  // Re-render every 20s so the "synced Xs ago" label stays current.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 20_000);
-    return () => clearInterval(id);
-  }, []);
 
   const refresh = async () => {
     // Force a real IMAP sync, then refresh the cached views.
