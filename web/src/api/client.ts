@@ -95,10 +95,17 @@ export const api = {
   listFolders: (accountId: string, refresh = false) =>
     request<Folder[]>(`/api/accounts/${accountId}/folders${refresh ? '?refresh=true' : ''}`),
 
-  listMessages: (accountId: string, folder: string, refresh = false) =>
-    request<MessageSummary[]>(
-      `/api/accounts/${accountId}/messages?${q(folder)}${refresh ? '&refresh=true' : ''}`,
-    ),
+  listMessages: (
+    accountId: string,
+    folder: string,
+    opts: { refresh?: boolean; limit?: number; offset?: number } = {},
+  ) => {
+    const params = [q(folder)];
+    if (opts.limit != null) params.push(`limit=${opts.limit}`);
+    if (opts.offset) params.push(`offset=${opts.offset}`);
+    if (opts.refresh) params.push('refresh=true');
+    return request<MessageSummary[]>(`/api/accounts/${accountId}/messages?${params.join('&')}`);
+  },
 
   getMessage: (accountId: string, folder: string, uid: number) =>
     request<MessageDetail>(`/api/accounts/${accountId}/messages/${uid}?${q(folder)}`),

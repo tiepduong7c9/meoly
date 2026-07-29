@@ -28,8 +28,10 @@ class HttpError extends Error {
 messagesRouter.get('/', async (req, res) => {
   const { accountId, folder } = ctx(req);
   const limit = req.query.limit ? Number(req.query.limit) : undefined;
-  const refresh = req.query.refresh === 'true';
-  const messages = await listMessages(accountId, folder, { limit, refresh });
+  const offset = req.query.offset ? Number(req.query.offset) : undefined;
+  // Only page 0 triggers a full IMAP reconcile; deeper pages read the cache.
+  const refresh = req.query.refresh === 'true' && !offset;
+  const messages = await listMessages(accountId, folder, { limit, offset, refresh });
   res.json(messages);
 });
 
