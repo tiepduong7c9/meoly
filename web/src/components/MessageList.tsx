@@ -206,7 +206,13 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
             onClick={toggleAll}
             className="flex w-full items-center gap-2 border-b border-neutral-100 px-4 py-1.5 text-left text-xs text-neutral-500 hover:bg-neutral-50"
           >
-            <input type="checkbox" readOnly checked={allSelected} className="h-3.5 w-3.5 accent-blue-600" />
+            <input
+              type="checkbox"
+              readOnly
+              tabIndex={-1}
+              checked={allSelected}
+              className="pointer-events-none h-3.5 w-3.5 accent-blue-600"
+            />
             {allSelected ? 'Deselect all' : `Select all ${uids.length}`}
           </button>
         )}
@@ -219,25 +225,28 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
                 isChecked ? 'bg-blue-50' : selectedUid === m.uid ? 'bg-neutral-100' : 'hover:bg-neutral-50'
               }`}
             >
-              <label
-                className={`flex cursor-pointer items-center self-stretch pl-4 pr-1 ${
-                  selecting || isChecked ? '' : 'opacity-0 group-hover:opacity-100'
-                }`}
+              <div
+                role="checkbox"
+                aria-checked={isChecked}
                 onClick={(e) => {
-                  e.preventDefault();
+                  e.stopPropagation();
                   toggle(m.uid, e.shiftKey);
                 }}
+                className={`flex cursor-pointer items-center self-stretch pl-4 pr-3 ${
+                  selecting || isChecked ? '' : 'opacity-0 group-hover:opacity-100'
+                }`}
               >
                 <input
                   type="checkbox"
                   readOnly
+                  tabIndex={-1}
                   checked={isChecked}
-                  className="h-4 w-4 accent-blue-600"
+                  className="pointer-events-none h-4 w-4 accent-blue-600"
                 />
-              </label>
+              </div>
               <button
                 onClick={() => onSelect(m.uid)}
-                className="flex min-w-0 flex-1 flex-col gap-0.5 py-3 pr-4 pl-1 text-left"
+                className="flex min-w-0 flex-1 flex-col gap-0.5 py-3 pr-4 pl-0 text-left"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span
