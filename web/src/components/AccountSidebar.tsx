@@ -1,7 +1,7 @@
-import { Plus, Mail, Trash, RefreshCw, AlertCircle, Bot, ChevronRight } from 'lucide-react';
+import { Plus, Mail, RefreshCw, AlertCircle, Bot, ChevronRight } from 'lucide-react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import type { Account, Folder } from '../api/types';
-import { useAiStatus, useDeleteAccount, useFolders, useSyncAccount } from '../hooks';
+import { useAiStatus, useFolders, useSyncAccount } from '../hooks';
 import { folderIcon, sortFolders } from '../lib/folders';
 
 interface Props {
@@ -103,15 +103,17 @@ function AccountBlock({
   onSelectAccount: () => void;
   onSelectFolder: (path: string) => void;
 }) {
-  const deleteAccount = useDeleteAccount();
   const syncAccount = useSyncAccount();
   const qc = useQueryClient();
-  const folders = useFolders(expanded ? account.id : null);
+  // Fetch folders even when collapsed so the total unread badge stays live.
+  const folders = useFolders(account.id);
   // Account is "syncing" while any of its folders is being synced in the
   // background, or while its folder list is being (re)fetched.
   const anyFolderSyncing = folders.data?.some((f) => f.syncStatus === 'syncing') ?? false;
   const listFetching = useIsFetching({ queryKey: ['folders', account.id] }) > 0;
   const syncing = anyFolderSyncing || listFetching || syncAccount.isPending;
+  // Total unread across all of this account's folders — shown when collapsed.
+  const totalUnread = folders.data?.reduce((sum, f) => sum + f.unseen, 0) ?? 0;
 
   const syncNow = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -139,26 +141,28 @@ function AccountBlock({
           <span className="truncate">{account.label}</span>
         </span>
         <span className="flex items-center gap-1">
-          {syncing ? (
+          {expanded ? (
+            // Expanded: allow a manual sync (spinner while a pass is running).
+            syncing ? (
+              <RefreshCw size={13} className="animate-spin text-white/60" aria-label="Syncing" />
+            ) : (
+              <RefreshCw
+                size={13}
+                className="text-white/60 hover:text-white"
+                onClick={syncNow}
+                aria-label="Sync now"
+              />
+            )
+          ) : syncing ? (
             <RefreshCw size={13} className="animate-spin text-neutral-400" aria-label="Syncing" />
           ) : (
-            <RefreshCw
-              size={13}
-              className="hidden text-neutral-400 hover:text-neutral-700 group-hover:block"
-              onClick={syncNow}
-              aria-label="Sync now"
-            />
+            // Collapsed: surface the total unread count instead of controls.
+            totalUnread > 0 && (
+              <span className="rounded-full bg-neutral-200 px-1.5 text-xs text-neutral-700">
+                {totalUnread}
+              </span>
+            )
           )}
-          <Trash
-            size={15}
-            className="hidden text-neutral-400 hover:text-red-600 group-hover:block"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (confirm(`Remove ${account.label}? Cached mail will be deleted.`)) {
-                deleteAccount.mutate(account.id);
-              }
-            }}
-          />
         </span>
       </button>
 

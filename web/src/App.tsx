@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Mail, LogOut } from 'lucide-react';
+import { Mail, LogOut, Settings } from 'lucide-react';
 import { AccountSidebar } from './components/AccountSidebar';
 import { MessageList, FolderSyncStatus } from './components/MessageList';
 import { MessageView } from './components/MessageView';
 import { AddAccountDialog } from './components/AddAccountDialog';
+import { AccountSettingsDialog } from './components/AccountSettingsDialog';
 import { ReviewPanel } from './components/ReviewPanel';
 import { LoginPage } from './LoginPage';
 import { useAccounts, useFolders } from './hooks';
@@ -61,6 +62,7 @@ export function App() {
 function AuthedApp({ onLogout }: { onLogout: () => void }) {
   const { data: accounts = [], isLoading } = useAccounts();
   const [showAdd, setShowAdd] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<View>('mail');
   const [accountId, setAccountId] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
@@ -143,12 +145,15 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
       )}
 
       {showAdd && <AddAccountDialog onClose={() => setShowAdd(false)} />}
+      {showSettings && (
+        <AccountSettingsDialog accounts={accounts} onClose={() => setShowSettings(false)} />
+      )}
       </div>
 
       <div className="flex shrink-0 items-center border-t border-neutral-200 bg-neutral-50">
-        {/* Left slot — matches sidebar width */}
-        <div className="flex w-64 shrink-0 items-center px-3 py-1.5">
-          {onLogout && (
+        {/* Left slot — matches sidebar width: Sign out left, Settings right */}
+        <div className="flex w-64 shrink-0 items-center justify-between px-3 py-1.5">
+          {onLogout ? (
             <button
               onClick={onLogout}
               className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-700"
@@ -156,9 +161,18 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
               <LogOut size={13} />
               Sign out
             </button>
+          ) : (
+            <span />
           )}
+          <button
+            onClick={() => setShowSettings(true)}
+            className="flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-700"
+          >
+            <Settings size={13} />
+            Settings
+          </button>
         </div>
-        {/* Right slot — aligns with message list column */}
+        {/* Right area — aligns with the message list column */}
         {accountId && folder && <FolderSyncStatus accountId={accountId} folder={folder} />}
       </div>
     </div>
