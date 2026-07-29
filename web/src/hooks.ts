@@ -220,6 +220,8 @@ export function useMessageMutations(accountId: string, folder: string) {
   const listKey = ['messages', accountId, folder];
   const foldersKey = ['folders', accountId];
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorMsgs = useRef<string[]>([]);
 
   const rollback = (ctx?: ActionCtx) => {
     if (!ctx) return;
@@ -265,9 +267,25 @@ export function useMessageMutations(accountId: string, folder: string) {
     return { prevList, prevFolders };
   };
 
+  // Roll back immediately, but coalesce error alerts across a burst: a bulk
+  // action fires many mutations at once, and one blocking alert() per failure
+  // would stack N modal dialogs. Collect the messages and surface a single
+  // (deduped) alert once the burst settles.
   const onError = (err: unknown, ctx: ActionCtx | undefined) => {
     rollback(ctx);
-    alert((err as Error).message);
+    errorMsgs.current.push((err as Error).message);
+    if (errorTimer.current) clearTimeout(errorTimer.current);
+    errorTimer.current = setTimeout(() => {
+      errorTimer.current = null;
+      const msgs = errorMsgs.current;
+      errorMsgs.current = [];
+      const unique = Array.from(new Set(msgs));
+      alert(
+        msgs.length > 1
+          ? `${msgs.length} actions failed:\n${unique.join('\n')}`
+          : unique[0],
+      );
+    }, 0);
   };
 
   // Removals share one key; the read-toggle uses a sibling key. Both live under
