@@ -1,10 +1,12 @@
 import { useRef } from 'react';
 import {
+  useInfiniteQuery,
   useIsMutating,
   useMutation,
   useMutationState,
   useQuery,
   useQueryClient,
+  type InfiniteData,
 } from '@tanstack/react-query';
 import { api } from './api/client';
 import type {
@@ -48,19 +50,42 @@ export function useFolders(accountId: string | null) {
   });
 }
 
+// Messages are fetched a page at a time and appended as the user scrolls, so a
+// folder with thousands of messages doesn't ship its whole contents up front.
+export const MESSAGE_PAGE_SIZE = 50;
+
+// Cache shape for the paged message list. Each page is one MESSAGE_PAGE_SIZE
+// slice; the mutation layer below flattens/maps across pages.
+export type MessagePages = InfiniteData<MessageSummary[], number>;
+
 export function useMessages(
   accountId: string | null,
   folder: string | null,
   opts: { pausePolling?: boolean } = {},
 ) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ['messages', accountId, folder],
-    queryFn: () => api.listMessages(accountId!, folder!),
+    queryFn: ({ pageParam }) =>
+      api.listMessages(accountId!, folder!, {
+        limit: MESSAGE_PAGE_SIZE,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    // Next offset is always the count of pages already loaded × page size.
+    // Deliberately NOT gated on page length: an optimistic removal shrinks a
+    // page below MESSAGE_PAGE_SIZE, and gating here would drop the next
+    // pageParam and permanently disable fetchNextPage. Termination is instead
+    // driven by `hasMore` (loaded < folder total) in useFilteredMessages; the
+    // empty-page check only guards the case where the total is momentarily
+    // stale and we fetch one page past the real tail.
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === 0 ? undefined : allPages.length * MESSAGE_PAGE_SIZE,
     enabled: !!accountId && !!folder,
     // Poll the open folder so newly synced mail appears without manual refresh.
-    // Paused while destructive actions are in flight: a poll issued mid-mutation
-    // reads the cache before the server's post-move DB delete lands, so its
-    // late-arriving response would resurrect a just-removed message.
+    // Refetch revalidates every loaded page. Paused while destructive actions
+    // are in flight: a poll issued mid-mutation reads the cache before the
+    // server's post-move DB delete lands, so its late-arriving response would
+    // resurrect a just-removed message.
     refetchInterval: opts.pausePolling ? false : 12_000,
   });
 }
@@ -84,6 +109,9 @@ export function useFilteredMessages(accountId: string | null, folder: string | n
   // Prefix match covers both 'remove' and 'read' actions for this folder.
   const pending = useIsMutating({ mutationKey: ['message-action', accountId, folder] });
   const query = useMessages(accountId, folder, { pausePolling: pending > 0 });
+  // Folder meta supplies the authoritative message total used to decide whether
+  // more pages remain (see hasMore below). Shares the cached folders query.
+  const { data: folders } = useFolders(accountId);
 
   const pendingUids = useMutationState({
     filters: {
@@ -95,10 +123,32 @@ export function useFilteredMessages(accountId: string | null, folder: string | n
 
   const pendingSet = new Set(pendingUids.filter((u): u is number => u != null));
 
-  return {
-    ...query,
-    data: pendingSet.size > 0 ? query.data?.filter((m) => !pendingSet.has(m.uid)) : query.data,
-  };
+  // Flatten the paged cache into the single list the view renders. Offset paging
+  // can surface the same uid on adjacent pages when newly synced mail shifts the
+  // window between page fetches, so dedupe by uid (keep first). Also drop any
+  // UID with a pending removal (see guard #2 above).
+  const pages = query.data?.pages;
+  let data: MessageSummary[] | undefined;
+  if (pages) {
+    const seen = new Set<number>();
+    data = [];
+    for (const page of pages) {
+      for (const m of page) {
+        if (seen.has(m.uid) || pendingSet.has(m.uid)) continue;
+        seen.add(m.uid);
+        data.push(m);
+      }
+    }
+  }
+
+  // Whether more pages remain is derived from the folder's authoritative total,
+  // NOT the mutable page length: an optimistic removal shrinks both the loaded
+  // list and the folder total together, so this stays correct mid-action where a
+  // length-based check would falsely end pagination.
+  const total = folders?.find((f) => f.path === folder)?.total ?? 0;
+  const hasMore = (data?.length ?? 0) < total;
+
+  return { ...query, data, hasMore };
 }
 
 export function useSyncAccount() {
@@ -206,8 +256,18 @@ export function useUpdateAiGlobalSettings() {
 }
 
 interface ActionCtx {
-  prevList?: MessageSummary[];
+  prevList?: MessagePages;
   prevFolders?: Folder[];
+}
+
+// Apply a transform to every page of the paged message cache, preserving the
+// InfiniteData shape (pages/pageParams) so optimistic edits survive refetch.
+function mapPages(
+  data: MessagePages | undefined,
+  fn: (page: MessageSummary[]) => MessageSummary[],
+): MessagePages | undefined {
+  if (!data) return data;
+  return { ...data, pages: data.pages.map(fn) };
 }
 
 /**
@@ -249,10 +309,12 @@ export function useMessageMutations(accountId: string, folder: string) {
   // Optimistically drop a message from the current folder and adjust counts.
   const optimisticRemove = async (uid: number): Promise<ActionCtx> => {
     await qc.cancelQueries({ queryKey: listKey });
-    const prevList = qc.getQueryData<MessageSummary[]>(listKey);
+    const prevList = qc.getQueryData<MessagePages>(listKey);
     const prevFolders = qc.getQueryData<Folder[]>(foldersKey);
-    const wasSeen = prevList?.find((m) => m.uid === uid)?.seen ?? true;
-    qc.setQueryData<MessageSummary[]>(listKey, (old) => old?.filter((m) => m.uid !== uid));
+    const wasSeen = prevList?.pages.flat().find((m) => m.uid === uid)?.seen ?? true;
+    qc.setQueryData<MessagePages>(listKey, (old) =>
+      mapPages(old, (page) => page.filter((m) => m.uid !== uid)),
+    );
     qc.setQueryData<Folder[]>(foldersKey, (old) =>
       old?.map((f) =>
         f.path === folder
@@ -326,11 +388,13 @@ export function useMessageMutations(accountId: string, folder: string) {
       api.setRead(accountId, folder, v.uid, v.seen),
     onMutate: async (v): Promise<ActionCtx> => {
       await qc.cancelQueries({ queryKey: listKey });
-      const prevList = qc.getQueryData<MessageSummary[]>(listKey);
+      const prevList = qc.getQueryData<MessagePages>(listKey);
       const prevFolders = qc.getQueryData<Folder[]>(foldersKey);
-      const wasSeen = prevList?.find((m) => m.uid === v.uid)?.seen;
-      qc.setQueryData<MessageSummary[]>(listKey, (old) =>
-        old?.map((m) => (m.uid === v.uid ? { ...m, seen: v.seen } : m)),
+      const wasSeen = prevList?.pages.flat().find((m) => m.uid === v.uid)?.seen;
+      qc.setQueryData<MessagePages>(listKey, (old) =>
+        mapPages(old, (page) =>
+          page.map((m) => (m.uid === v.uid ? { ...m, seen: v.seen } : m)),
+        ),
       );
       qc.setQueryData<MessageDetail>(['message', accountId, folder, v.uid], (old) =>
         old ? { ...old, seen: v.seen } : old,

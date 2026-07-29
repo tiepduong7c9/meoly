@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, AlertCircle, Mail, MailOpen, Paperclip, RefreshCw, Trash2, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { MessageSummary } from '../api/types';
-import { useFolders, useFilteredMessages, useMessageMutations } from '../hooks';
+import { MESSAGE_PAGE_SIZE, useFolders, useFilteredMessages, useMessageMutations } from '../hooks';
 import { MoveMenu } from './MoveMenu';
 
 // SQLite datetime('now') is space-separated UTC without a zone; normalize it.
@@ -48,7 +48,8 @@ interface Props {
 }
 
 export function MessageList({ accountId, folder, selectedUid, onSelect }: Props) {
-  const { data, isLoading, isFetching, isError, error } = useFilteredMessages(accountId, folder);
+  const { data, isLoading, isFetching, isError, error, fetchNextPage, hasMore, isFetchingNextPage, refetch } =
+    useFilteredMessages(accountId, folder);
   const { data: folders } = useFolders(accountId);
   const meta = folders?.find((f) => f.path === folder);
   const qc = useQueryClient();
@@ -70,11 +71,9 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
   const syncing = meta?.syncStatus === 'syncing' || isFetching;
 
   const refresh = async () => {
-    // Force a real IMAP sync, then refresh the cached views.
-    await qc.fetchQuery({
-      queryKey: ['messages', accountId, folder],
-      queryFn: () => api.listMessages(accountId, folder, true),
-    });
+    // Force a real IMAP reconcile on page 0, then revalidate every loaded page.
+    await api.listMessages(accountId, folder, { refresh: true, limit: MESSAGE_PAGE_SIZE, offset: 0 });
+    await refetch();
     qc.invalidateQueries({ queryKey: ['folders', accountId] });
   };
 
@@ -90,6 +89,24 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
       return next.size === prev.size ? prev : next;
     });
   }, [uids]);
+
+  // Auto-load the next page when a sentinel near the list bottom scrolls into
+  // view. rootMargin fetches slightly ahead so scrolling stays smooth.
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { rootMargin: '300px' },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasMore, isFetchingNextPage, fetchNextPage]);
 
   const allSelected = uids.length > 0 && selected.size === uids.length;
 
@@ -267,6 +284,11 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
             </div>
           );
         })}
+        {/* Sentinel + status for infinite scroll. */}
+        {hasMore && <div ref={sentinelRef} className="h-px" />}
+        {isFetchingNextPage && (
+          <p className="p-3 text-center text-xs text-neutral-400">Loading more…</p>
+        )}
       </div>
 
     </div>

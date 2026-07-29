@@ -32,13 +32,18 @@ function toSummary(r: MessageRow): MessageSummary {
   };
 }
 
-function readMessages(accountId: string, path: string, limit: number): MessageSummary[] {
+function readMessages(
+  accountId: string,
+  path: string,
+  limit: number,
+  offset: number,
+): MessageSummary[] {
   const rows = db
     .prepare(
       `SELECT * FROM messages WHERE account_id = ? AND folder_path = ?
-       ORDER BY date DESC, uid DESC LIMIT ?`,
+       ORDER BY date DESC, uid DESC LIMIT ? OFFSET ?`,
     )
-    .all(accountId, path, limit) as MessageRow[];
+    .all(accountId, path, limit, offset) as MessageRow[];
   return rows.map(toSummary);
 }
 
@@ -47,13 +52,17 @@ function readMessages(accountId: string, path: string, limit: number): MessageSu
  * in sync, so reads are fast and non-blocking. `refresh` forces a full folder
  * reconcile now; a folder that has never been synced is populated inline so the
  * first open isn't empty before the background loop reaches it.
+ *
+ * Reads are paged with `limit`/`offset` so folders with many messages load
+ * incrementally as the client scrolls, rather than shipping the whole folder.
  */
 export async function listMessages(
   accountId: string,
   path: string,
-  opts: { limit?: number; refresh?: boolean } = {},
+  opts: { limit?: number; offset?: number; refresh?: boolean } = {},
 ): Promise<MessageSummary[]> {
   const limit = opts.limit ?? 200;
+  const offset = opts.offset ?? 0;
 
   if (opts.refresh) {
     await syncFolderFull(accountId, path);
@@ -69,7 +78,7 @@ export async function listMessages(
       }
     }
   }
-  return readMessages(accountId, path, limit);
+  return readMessages(accountId, path, limit, offset);
 }
 
 export interface MessageDetail extends MessageSummary {
