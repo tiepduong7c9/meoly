@@ -1,4 +1,3 @@
-import type { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { db } from '../db/index.js';
 import { getClient, withMailbox } from './pool.js';
@@ -283,9 +282,12 @@ export async function syncFolderFull(accountId: string, path: string): Promise<v
         path,
       );
 
-      // 7. Progressively cache bodies for the newest messages lacking one.
-      await prefetchBodies(client, accountId, path);
     });
+
+    // Prefetch bodies outside the sync lock so user-triggered fetches (open
+    // message) can interleave between individual body downloads instead of
+    // waiting for the entire prefetch batch before the lock is released.
+    await prefetchBodies(accountId, path);
 
     db.prepare(
       `UPDATE folders SET last_synced_at = datetime('now') WHERE account_id = ? AND path = ?`,
@@ -298,7 +300,7 @@ export async function syncFolderFull(accountId: string, path: string): Promise<v
 }
 
 /** Download and cache bodies for the newest messages without a cached body. */
-async function prefetchBodies(client: ImapFlow, accountId: string, path: string): Promise<void> {
+async function prefetchBodies(accountId: string, path: string): Promise<void> {
   const targets = db
     .prepare(
       `SELECT m.uid FROM messages m
@@ -311,10 +313,16 @@ async function prefetchBodies(client: ImapFlow, accountId: string, path: string)
 
   for (const { uid } of targets) {
     try {
-      // BODY.PEEK — must not set \Seen.
-      const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
-      if (!msg || typeof msg === 'boolean' || !msg.source) continue;
-      const parsed = await simpleParser(msg.source);
+      // Hold the lock only for the network fetch; release before parsing and
+      // writing so CPU-heavy simpleParser doesn't block concurrent user ops.
+      const source = await withMailbox(accountId, path, async (client) => {
+        // BODY.PEEK — must not set \Seen.
+        const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
+        if (!msg || typeof msg === 'boolean' || !msg.source) return null;
+        return msg.source;
+      });
+      if (!source) continue;
+      const parsed = await simpleParser(source);
       const attachments: Attachment[] = (parsed.attachments ?? []).map((a) => ({
         filename: a.filename ?? null,
         contentType: a.contentType,
