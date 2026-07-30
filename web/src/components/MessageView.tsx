@@ -10,11 +10,14 @@ interface Props {
   uid: number;
   folders: Folder[];
   onClose: () => void;
+  // Which list (full vs unread) the message list is showing, so single-message
+  // actions optimistically edit the same cache key the user is viewing.
+  showUnreadOnly: boolean;
 }
 
-export function MessageView({ accountId, folder, uid, folders, onClose }: Props) {
+export function MessageView({ accountId, folder, uid, folders, onClose, showUnreadOnly }: Props) {
   const { data: message, isLoading, isError, error } = useMessage(accountId, folder, uid);
-  const { move, archive, remove, setRead } = useMessageMutations(accountId, folder);
+  const { move, archive, remove, setRead } = useMessageMutations(accountId, folder, showUnreadOnly);
 
   // Mark as read when an unread message is opened (once per opened message, so
   // the toolbar's "mark unread" isn't immediately undone).

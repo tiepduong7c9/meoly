@@ -98,12 +98,13 @@ export const api = {
   listMessages: (
     accountId: string,
     folder: string,
-    opts: { refresh?: boolean; limit?: number; offset?: number } = {},
+    opts: { refresh?: boolean; limit?: number; offset?: number; unseen?: boolean } = {},
   ) => {
     const params = [q(folder)];
     if (opts.limit != null) params.push(`limit=${opts.limit}`);
     if (opts.offset) params.push(`offset=${opts.offset}`);
     if (opts.refresh) params.push('refresh=true');
+    if (opts.unseen) params.push('unseen=true');
     return request<MessageSummary[]>(`/api/accounts/${accountId}/messages?${params.join('&')}`);
   },
 
