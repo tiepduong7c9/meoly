@@ -45,6 +45,9 @@ interface Props {
   folder: string;
   selectedUid: number | null;
   onSelect: (uid: number | null) => void;
+  // Reports the list's current ordered UIDs up to MailPane, which uses them for
+  // keyboard navigation and for choosing the next message after an action.
+  onUidsChange?: (uids: number[]) => void;
   // Lifted to App so MessageView and FolderSyncStatus read the same list (cache
   // key) the user is viewing — see messagesKey in hooks.ts.
   showUnreadOnly: boolean;
@@ -56,6 +59,7 @@ export function MessageList({
   folder,
   selectedUid,
   onSelect,
+  onUidsChange,
   showUnreadOnly,
   onToggleUnread,
 }: Props) {
@@ -112,6 +116,23 @@ export function MessageList({
   );
 
   const uids = useMemo(() => displayData?.map((m) => m.uid) ?? [], [displayData]);
+
+  // Report the ordered UIDs up to MailPane for keyboard nav. Guard on a stable
+  // key so the polling re-renders (new array identity, same contents) don't churn
+  // the parent's state.
+  const reportedUids = useRef<string>('');
+  useEffect(() => {
+    const key = uids.join(',');
+    if (key === reportedUids.current) return;
+    reportedUids.current = key;
+    onUidsChange?.(uids);
+  }, [uids, onUidsChange]);
+
+  // Keep the keyboard-selected row visible as the user arrows past the viewport.
+  const selectedRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selectedUid]);
 
   // Drop selected UIDs that have left the list (synced away, moved elsewhere),
   // so a bulk action never fires against a message no longer in this folder.
@@ -285,6 +306,7 @@ export function MessageList({
           return (
             <div
               key={m.uid}
+              ref={selectedUid === m.uid ? selectedRef : undefined}
               className={`group flex items-start border-b border-neutral-100 ${
                 isChecked ? 'bg-blue-50' : selectedUid === m.uid ? 'bg-neutral-100' : 'hover:bg-neutral-50'
               }`}
