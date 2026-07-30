@@ -1,5 +1,12 @@
 import { env } from '../env.js';
-import { archiveMessage, deleteMessage, markSeen } from '../imap/operations.js';
+import {
+  archiveMany,
+  archiveMessage,
+  deleteMany,
+  deleteMessage,
+  markSeen,
+  markSeenMany,
+} from '../imap/operations.js';
 import { syncFolderInBackground } from '../imap/scheduler.js';
 import { getSuggestion, transition, type AiAccountSettings, type AiSuggestion } from './store.js';
 import type { AiAction, AiDecisionSource } from '../types.js';
@@ -96,6 +103,120 @@ export async function applyDecision(
     });
     throw err;
   }
+}
+
+/**
+ * Apply a decision to many suggestions at once. Same-action rows in the same
+ * folder are grouped so the IMAP side runs as a single batched command per group
+ * (shared with the message-list bulk path). The per-row claim/transition state
+ * machine mirrors applyDecision so web/Telegram/auto races still resolve to one
+ * winner. Returns one result per input id, in input order.
+ */
+export async function applyDecisionsBatch(
+  ids: string[],
+  action: AiAction | 'approve' | 'reject',
+  source: AiDecisionSource,
+): Promise<Array<Record<string, unknown>>> {
+  const results = new Map<string, Record<string, unknown>>();
+
+  // Claimed rows awaiting their IMAP action, grouped by account+folder+action.
+  interface Claimed {
+    s: AiSuggestion;
+    act: AiAction;
+  }
+  const groups = new Map<string, Claimed[]>();
+
+  for (const id of ids) {
+    const s = getSuggestion(id);
+    if (!s) {
+      results.set(id, { id, error: 'not found' });
+      continue;
+    }
+    const act = action === 'approve' ? s.action : action;
+
+    if (act === 'reject') {
+      const ok = transition(id, {
+        status: 'rejected',
+        expectedStatus: 'pending',
+        source,
+        reviewed: true,
+      });
+      results.set(id, {
+        id,
+        status: ok ? 'rejected' : (getSuggestion(id)?.status ?? s.status),
+        applied: false,
+        dryRun: false,
+        alreadyResolved: !ok,
+      });
+      continue;
+    }
+
+    // Claim pending → approved so a concurrent actor can't double-apply.
+    const claimed = transition(id, {
+      status: 'approved',
+      expectedStatus: 'pending',
+      appliedAction: act,
+      source,
+      reviewed: true,
+    });
+    if (!claimed) {
+      results.set(id, {
+        id,
+        status: getSuggestion(id)?.status ?? s.status,
+        applied: false,
+        dryRun: false,
+        alreadyResolved: true,
+      });
+      continue;
+    }
+    const key = `${s.accountId}\n${s.folderPath}\n${act}`;
+    const list = groups.get(key);
+    if (list) list.push({ s, act });
+    else groups.set(key, [{ s, act }]);
+  }
+
+  // Apply each group with a single batched IMAP op (no-op for keep / dry-run).
+  for (const claimedList of groups.values()) {
+    const { accountId, folderPath } = claimedList[0].s;
+    const act = claimedList[0].act;
+    const uids = claimedList.map((c) => c.s.uid);
+    try {
+      if (!env.ai.dryRun && act !== 'keep') {
+        if (act === 'mark_read') {
+          await markSeenMany(accountId, folderPath, uids, true);
+        } else if (act === 'archive') {
+          const dest = await archiveMany(accountId, folderPath, uids);
+          syncFolderInBackground(accountId, dest);
+        } else if (act === 'delete') {
+          const res = await deleteMany(accountId, folderPath, uids, false); // soft → Trash
+          if (res.target) syncFolderInBackground(accountId, res.target);
+        }
+      }
+      for (const { s } of claimedList) {
+        transition(s.id, {
+          status: 'applied',
+          expectedStatus: 'approved',
+          dryRun: env.ai.dryRun,
+          applied: true,
+        });
+        results.set(s.id, {
+          id: s.id,
+          status: 'applied',
+          applied: true,
+          dryRun: env.ai.dryRun,
+          alreadyResolved: false,
+        });
+      }
+    } catch (err) {
+      const message = (err as Error).message;
+      for (const { s } of claimedList) {
+        transition(s.id, { status: 'error', expectedStatus: 'approved', error: message });
+        results.set(s.id, { id: s.id, error: message });
+      }
+    }
+  }
+
+  return ids.map((id) => results.get(id) ?? { id, error: 'not found' });
 }
 
 /** Whether a fresh suggestion qualifies for hands-off auto-apply. */

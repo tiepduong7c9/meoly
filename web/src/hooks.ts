@@ -329,6 +329,55 @@ export function useMessageMutations(accountId: string, folder: string) {
     return { prevList, prevFolders };
   };
 
+  // Bulk variant: drop many messages and adjust counts in a single cache pass.
+  const optimisticRemoveMany = async (uids: number[]): Promise<ActionCtx> => {
+    await qc.cancelQueries({ queryKey: listKey });
+    const prevList = qc.getQueryData<MessagePages>(listKey);
+    const prevFolders = qc.getQueryData<Folder[]>(foldersKey);
+    const set = new Set(uids);
+    const removed = (prevList?.pages.flat() ?? []).filter((m) => set.has(m.uid));
+    const unseenRemoved = removed.filter((m) => !m.seen).length;
+    qc.setQueryData<MessagePages>(listKey, (old) =>
+      mapPages(old, (page) => page.filter((m) => !set.has(m.uid))),
+    );
+    qc.setQueryData<Folder[]>(foldersKey, (old) =>
+      old?.map((f) =>
+        f.path === folder
+          ? {
+              ...f,
+              total: Math.max(0, f.total - removed.length),
+              unseen: Math.max(0, f.unseen - unseenRemoved),
+            }
+          : f,
+      ),
+    );
+    return { prevList, prevFolders };
+  };
+
+  // Bulk variant: toggle \Seen on many messages and adjust the unread count once.
+  const optimisticSetReadMany = async (uids: number[], seen: boolean): Promise<ActionCtx> => {
+    await qc.cancelQueries({ queryKey: listKey });
+    const prevList = qc.getQueryData<MessagePages>(listKey);
+    const prevFolders = qc.getQueryData<Folder[]>(foldersKey);
+    const set = new Set(uids);
+    const flipped = (prevList?.pages.flat() ?? []).filter(
+      (m) => set.has(m.uid) && m.seen !== seen,
+    ).length;
+    qc.setQueryData<MessagePages>(listKey, (old) =>
+      mapPages(old, (page) => page.map((m) => (set.has(m.uid) ? { ...m, seen } : m))),
+    );
+    if (flipped > 0) {
+      qc.setQueryData<Folder[]>(foldersKey, (old) =>
+        old?.map((f) =>
+          f.path === folder
+            ? { ...f, unseen: Math.max(0, f.unseen + (seen ? -flipped : flipped)) }
+            : f,
+        ),
+      );
+    }
+    return { prevList, prevFolders };
+  };
+
   // Roll back immediately, but coalesce error alerts across a burst: a bulk
   // action fires many mutations at once, and one blocking alert() per failure
   // would stack N modal dialogs. Collect the messages and surface a single
@@ -414,5 +463,44 @@ export function useMessageMutations(accountId: string, folder: string) {
     onSettled: invalidateAll,
   });
 
-  return { move, archive, remove, setRead };
+  // Bulk mutations: one request for the whole selection, one optimistic pass, one
+  // settle. They share the same mutation keys as the single actions so polling
+  // still pauses for the burst (see invalidateAll).
+  const bulkArchive = useMutation({
+    mutationKey: removeKey,
+    mutationFn: (v: { uids: number[] }) =>
+      api.bulk(accountId, folder, { action: 'archive', uids: v.uids }),
+    onMutate: (v) => optimisticRemoveMany(v.uids),
+    onError: (e, _v, ctx) => onError(e, ctx),
+    onSettled: invalidateAll,
+  });
+
+  const bulkMove = useMutation({
+    mutationKey: removeKey,
+    mutationFn: (v: { uids: number[]; target: string }) =>
+      api.bulk(accountId, folder, { action: 'move', uids: v.uids, target: v.target }),
+    onMutate: (v) => optimisticRemoveMany(v.uids),
+    onError: (e, _v, ctx) => onError(e, ctx),
+    onSettled: invalidateAll,
+  });
+
+  const bulkRemove = useMutation({
+    mutationKey: removeKey,
+    mutationFn: (v: { uids: number[]; hard?: boolean }) =>
+      api.bulk(accountId, folder, { action: 'delete', uids: v.uids, hard: v.hard ?? false }),
+    onMutate: (v) => optimisticRemoveMany(v.uids),
+    onError: (e, _v, ctx) => onError(e, ctx),
+    onSettled: invalidateAll,
+  });
+
+  const bulkSetRead = useMutation({
+    mutationKey: readKey,
+    mutationFn: (v: { uids: number[]; seen: boolean }) =>
+      api.bulk(accountId, folder, { action: v.seen ? 'read' : 'unread', uids: v.uids }),
+    onMutate: (v) => optimisticSetReadMany(v.uids, v.seen),
+    onError: (e, _v, ctx) => onError(e, ctx),
+    onSettled: invalidateAll,
+  });
+
+  return { move, archive, remove, setRead, bulkArchive, bulkMove, bulkRemove, bulkSetRead };
 }

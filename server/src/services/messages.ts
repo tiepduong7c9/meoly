@@ -2,6 +2,7 @@ import { db } from '../db/index.js';
 import { syncFolderFull } from '../imap/sync.js';
 import { fetchBody } from '../imap/operations.js';
 import type { MessageBody } from '../imap/operations.js';
+import { pendingSet } from '../imap/actionQueue.js';
 import type { MessageRow } from '../types.js';
 
 export interface MessageSummary {
@@ -44,7 +45,11 @@ function readMessages(
        ORDER BY date DESC, uid DESC LIMIT ? OFFSET ?`,
     )
     .all(accountId, path, limit, offset) as MessageRow[];
-  return rows.map(toSummary);
+  // Hide messages whose removal is queued but not yet confirmed on the server,
+  // so a fetch never resurrects something the user just archived/moved/deleted.
+  const pending = pendingSet(accountId, path);
+  const visible = pending.size ? rows.filter((r) => !pending.has(r.uid)) : rows;
+  return visible.map(toSummary);
 }
 
 /**

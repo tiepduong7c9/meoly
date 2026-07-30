@@ -11,7 +11,7 @@ import {
   updateAccountSettings,
   updateGlobalSettings,
 } from '../ai/store.js';
-import { applyDecision } from '../ai/executor.js';
+import { applyDecision, applyDecisionsBatch } from '../ai/executor.js';
 import type { AiSuggestionStatus } from '../types.js';
 import { queueDepth, triageAccount, triageAllAccounts } from '../ai/triage.js';
 import { triggerAiTriage } from '../ai/scheduler.js';
@@ -85,20 +85,7 @@ aiRouter.post('/suggestions/decision', async (req, res) => {
     return;
   }
   const { ids, action } = parsed.data;
-  const results: Array<Record<string, unknown>> = [];
-  for (const id of ids) {
-    const s = getSuggestion(id);
-    if (!s) {
-      results.push({ id, error: 'not found' });
-      continue;
-    }
-    const act = action === 'approve' ? s.action : action;
-    try {
-      results.push({ id, ...(await applyDecision(id, act, 'web')) });
-    } catch (err) {
-      results.push({ id, error: (err as Error).message });
-    }
-  }
+  const results = await applyDecisionsBatch(ids, action, 'web');
   res.json({ ok: true, results });
 });
 
