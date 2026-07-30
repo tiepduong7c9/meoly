@@ -38,10 +38,12 @@ function readMessages(
   path: string,
   limit: number,
   offset: number,
+  unseenOnly: boolean,
 ): MessageSummary[] {
   const rows = db
     .prepare(
       `SELECT * FROM messages WHERE account_id = ? AND folder_path = ?
+       ${unseenOnly ? 'AND seen = 0' : ''}
        ORDER BY date DESC, uid DESC LIMIT ? OFFSET ?`,
     )
     .all(accountId, path, limit, offset) as MessageRow[];
@@ -64,7 +66,7 @@ function readMessages(
 export async function listMessages(
   accountId: string,
   path: string,
-  opts: { limit?: number; offset?: number; refresh?: boolean } = {},
+  opts: { limit?: number; offset?: number; refresh?: boolean; unseenOnly?: boolean } = {},
 ): Promise<MessageSummary[]> {
   const limit = opts.limit ?? 200;
   const offset = opts.offset ?? 0;
@@ -83,7 +85,7 @@ export async function listMessages(
       }
     }
   }
-  return readMessages(accountId, path, limit, offset);
+  return readMessages(accountId, path, limit, offset, opts.unseenOnly ?? false);
 }
 
 export interface MessageDetail extends MessageSummary {

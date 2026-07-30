@@ -67,6 +67,9 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
   const [uid, setUid] = useState<number | null>(null);
+  // Owned here so the message list, the open message, and the sync-status bar all
+  // read the same list (cache key) — see messagesKey in hooks.ts.
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
   const folders = useFolders(accountId);
 
@@ -90,10 +93,12 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
     setAccountId(id);
     setFolder(null);
     setUid(null);
+    setShowUnreadOnly(false);
   };
   const selectFolder = (path: string) => {
     setFolder(path);
     setUid(null);
+    setShowUnreadOnly(false);
   };
 
   return (
@@ -125,6 +130,8 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
             folder={folder}
             selectedUid={uid}
             onSelect={setUid}
+            showUnreadOnly={showUnreadOnly}
+            onToggleUnread={() => setShowUnreadOnly((v) => !v)}
           />
           {uid != null ? (
             <MessageView
@@ -133,6 +140,7 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
               uid={uid}
               folders={folders.data ?? []}
               onClose={() => setUid(null)}
+              showUnreadOnly={showUnreadOnly}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-neutral-400">
@@ -173,7 +181,9 @@ function AuthedApp({ onLogout }: { onLogout: () => void }) {
           </button>
         </div>
         {/* Right area — aligns with the message list column */}
-        {accountId && folder && <FolderSyncStatus accountId={accountId} folder={folder} />}
+        {accountId && folder && (
+          <FolderSyncStatus accountId={accountId} folder={folder} showUnreadOnly={showUnreadOnly} />
+        )}
       </div>
     </div>
   );

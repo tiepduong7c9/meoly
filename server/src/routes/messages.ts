@@ -35,7 +35,8 @@ messagesRouter.get('/', async (req, res) => {
   const offset = req.query.offset ? Number(req.query.offset) : undefined;
   // Only page 0 triggers a full IMAP reconcile; deeper pages read the cache.
   const refresh = req.query.refresh === 'true' && !offset;
-  const messages = await listMessages(accountId, folder, { limit, offset, refresh });
+  const unseenOnly = req.query.unseen === 'true';
+  const messages = await listMessages(accountId, folder, { limit, offset, refresh, unseenOnly });
   res.json(messages);
 });
 

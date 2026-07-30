@@ -45,11 +45,22 @@ interface Props {
   folder: string;
   selectedUid: number | null;
   onSelect: (uid: number | null) => void;
+  // Lifted to App so MessageView and FolderSyncStatus read the same list (cache
+  // key) the user is viewing — see messagesKey in hooks.ts.
+  showUnreadOnly: boolean;
+  onToggleUnread: () => void;
 }
 
-export function MessageList({ accountId, folder, selectedUid, onSelect }: Props) {
+export function MessageList({
+  accountId,
+  folder,
+  selectedUid,
+  onSelect,
+  showUnreadOnly,
+  onToggleUnread,
+}: Props) {
   const { data, isLoading, isFetching, isError, error, fetchNextPage, hasMore, isFetchingNextPage, refetch } =
-    useFilteredMessages(accountId, folder);
+    useFilteredMessages(accountId, folder, showUnreadOnly);
   const { data: folders } = useFolders(accountId);
   const meta = folders?.find((f) => f.path === folder);
   const qc = useQueryClient();
@@ -58,20 +69,18 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
     bulkMove: moveMut,
     bulkRemove: removeMut,
     bulkSetRead: setReadMut,
-  } = useMessageMutations(accountId, folder);
-
-  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  } = useMessageMutations(accountId, folder, showUnreadOnly);
 
   // Multi-select state: UIDs the user has checked for a bulk action. Anchored on
   // the last-clicked UID so Shift-click can select a contiguous range.
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
 
-  // Clear the selection and filter when the account or folder changes.
+  // Clear the selection when the account or folder changes. (The unread filter is
+  // reset by App, which owns that state.)
   useEffect(() => {
     setSelected(new Set());
     setAnchor(null);
-    setShowUnreadOnly(false);
   }, [accountId, folder]);
 
   // Prefer the server's persistent sync state (survives reloads, reflects
@@ -85,15 +94,18 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
     qc.invalidateQueries({ queryKey: ['folders', accountId] });
   };
 
-  // When showing unread only, eagerly load all remaining pages so unread messages
-  // on later pages aren't hidden — the scroll sentinel may never enter the viewport
-  // when the filtered list is short.
+  // When showing unread only, eagerly load all remaining pages so "Select all"
+  // covers the whole unread set, not just what's scrolled into view. The unread
+  // list is filtered server-side (bounded by the folder's unread count), so this
+  // pulls only the few unread pages rather than the entire folder.
   useEffect(() => {
     if (showUnreadOnly && hasMore && !isFetchingNextPage) {
       void fetchNextPage();
     }
   }, [showUnreadOnly, hasMore, isFetchingNextPage, fetchNextPage]);
 
+  // The server already filters to unread when showUnreadOnly; the client-side
+  // filter is a defensive guard against a just-read row lingering for one render.
   const displayData = useMemo(
     () => (showUnreadOnly ? (data ?? []).filter((m) => !m.seen) : data),
     [data, showUnreadOnly],
@@ -227,7 +239,7 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
           </div>
           <div className="flex items-center gap-0.5">
             <button
-              onClick={() => setShowUnreadOnly((v) => !v)}
+              onClick={onToggleUnread}
               title={showUnreadOnly ? 'Show all messages' : 'Show unread only'}
               className={`rounded p-1.5 ${showUnreadOnly ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' : 'hover:bg-neutral-100 text-neutral-500'}`}
             >
@@ -354,11 +366,15 @@ function BulkButton({
 export function FolderSyncStatus({
   accountId,
   folder,
+  showUnreadOnly,
 }: {
   accountId: string;
   folder: string;
+  showUnreadOnly: boolean;
 }) {
-  const { isFetching, isError } = useFilteredMessages(accountId, folder);
+  // Observe the same list (full vs unread) the user is viewing, so the fetching
+  // indicator reflects that view and no extra query is kept alive.
+  const { isFetching, isError } = useFilteredMessages(accountId, folder, showUnreadOnly);
   const { data: folders } = useFolders(accountId);
   const meta = folders?.find((f) => f.path === folder);
   const syncing = meta?.syncStatus === 'syncing' || isFetching;

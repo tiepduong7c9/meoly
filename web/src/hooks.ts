@@ -58,17 +58,27 @@ export const MESSAGE_PAGE_SIZE = 50;
 // slice; the mutation layer below flattens/maps across pages.
 export type MessagePages = InfiniteData<MessageSummary[], number>;
 
+// A given (account, folder) has two independently-paged lists: the full list and
+// the unread-only list (filtered server-side). They cache under distinct keys so
+// the unread view stays small and complete — bounded by the folder's unread count
+// rather than requiring the whole folder to be page-loaded client-side.
+export function messagesKey(accountId: string | null, folder: string | null, unseenOnly: boolean) {
+  return ['messages', accountId, folder, unseenOnly ? 'unseen' : 'all'] as const;
+}
+
 export function useMessages(
   accountId: string | null,
   folder: string | null,
-  opts: { pausePolling?: boolean } = {},
+  opts: { pausePolling?: boolean; unseenOnly?: boolean } = {},
 ) {
+  const unseenOnly = opts.unseenOnly ?? false;
   return useInfiniteQuery({
-    queryKey: ['messages', accountId, folder],
+    queryKey: messagesKey(accountId, folder, unseenOnly),
     queryFn: ({ pageParam }) =>
       api.listMessages(accountId!, folder!, {
         limit: MESSAGE_PAGE_SIZE,
         offset: pageParam,
+        unseen: unseenOnly,
       }),
     initialPageParam: 0,
     // Next offset is always the count of pages already loaded × page size.
@@ -105,10 +115,14 @@ export function useMessages(
  * the (multi-second) IMAP op, so without this a poll that raced the op can
  * resolve late — after the mutation settled — and briefly restore the old state.
  */
-export function useFilteredMessages(accountId: string | null, folder: string | null) {
+export function useFilteredMessages(
+  accountId: string | null,
+  folder: string | null,
+  unseenOnly = false,
+) {
   // Prefix match covers both 'remove' and 'read' actions for this folder.
   const pending = useIsMutating({ mutationKey: ['message-action', accountId, folder] });
-  const query = useMessages(accountId, folder, { pausePolling: pending > 0 });
+  const query = useMessages(accountId, folder, { pausePolling: pending > 0, unseenOnly });
   // Folder meta supplies the authoritative message total used to decide whether
   // more pages remain (see hasMore below). Shares the cached folders query.
   const { data: folders } = useFolders(accountId);
@@ -141,11 +155,14 @@ export function useFilteredMessages(accountId: string | null, folder: string | n
     }
   }
 
-  // Whether more pages remain is derived from the folder's authoritative total,
+  // Whether more pages remain is derived from the folder's authoritative count,
   // NOT the mutable page length: an optimistic removal shrinks both the loaded
-  // list and the folder total together, so this stays correct mid-action where a
-  // length-based check would falsely end pagination.
-  const total = folders?.find((f) => f.path === folder)?.total ?? 0;
+  // list and the count together, so this stays correct mid-action where a
+  // length-based check would falsely end pagination. In the unread view the
+  // bound is the folder's unread count, so eager loading pulls only the (few)
+  // unread pages rather than the whole folder.
+  const meta = folders?.find((f) => f.path === folder);
+  const total = (unseenOnly ? meta?.unseen : meta?.total) ?? 0;
   const hasMore = (data?.length ?? 0) < total;
 
   return { ...query, data, hasMore };
@@ -275,9 +292,12 @@ function mapPages(
  * call runs in the background, so the UI feels instant. On failure the cache is
  * rolled back; either way it re-syncs when the mutation settles.
  */
-export function useMessageMutations(accountId: string, folder: string) {
+export function useMessageMutations(accountId: string, folder: string, unseenOnly = false) {
   const qc = useQueryClient();
-  const listKey = ['messages', accountId, folder];
+  // Optimistic edits target the list the user is looking at (full vs unread), so
+  // they apply instantly; invalidateAll below refetches every ['messages', account]
+  // list so the other view reconciles on its next read.
+  const listKey = messagesKey(accountId, folder, unseenOnly);
   const foldersKey = ['folders', accountId];
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -372,6 +392,31 @@ export function useMessageMutations(accountId: string, folder: string) {
           f.path === folder
             ? { ...f, unseen: Math.max(0, f.unseen + (seen ? -flipped : flipped)) }
             : f,
+        ),
+      );
+    }
+    return { prevList, prevFolders };
+  };
+
+  // Unread-view variant of "mark read": a read message no longer belongs in the
+  // unread list, so drop the rows (rather than flip \Seen in place) and decrement
+  // the folder's unread count. The message total is unchanged — it still exists,
+  // just read — so hasMore in the unread view stays bounded by `unseen`.
+  const optimisticReadRemoveMany = async (uids: number[]): Promise<ActionCtx> => {
+    await qc.cancelQueries({ queryKey: listKey });
+    const prevList = qc.getQueryData<MessagePages>(listKey);
+    const prevFolders = qc.getQueryData<Folder[]>(foldersKey);
+    const set = new Set(uids);
+    const removedUnseen = (prevList?.pages.flat() ?? []).filter(
+      (m) => set.has(m.uid) && !m.seen,
+    ).length;
+    qc.setQueryData<MessagePages>(listKey, (old) =>
+      mapPages(old, (page) => page.filter((m) => !set.has(m.uid))),
+    );
+    if (removedUnseen > 0) {
+      qc.setQueryData<Folder[]>(foldersKey, (old) =>
+        old?.map((f) =>
+          f.path === folder ? { ...f, unseen: Math.max(0, f.unseen - removedUnseen) } : f,
         ),
       );
     }
@@ -497,7 +542,10 @@ export function useMessageMutations(accountId: string, folder: string) {
     mutationKey: readKey,
     mutationFn: (v: { uids: number[]; seen: boolean }) =>
       api.bulk(accountId, folder, { action: v.seen ? 'read' : 'unread', uids: v.uids }),
-    onMutate: (v) => optimisticSetReadMany(v.uids, v.seen),
+    onMutate: (v) =>
+      unseenOnly && v.seen
+        ? optimisticReadRemoveMany(v.uids)
+        : optimisticSetReadMany(v.uids, v.seen),
     onError: (e, _v, ctx) => onError(e, ctx),
     onSettled: invalidateAll,
   });
