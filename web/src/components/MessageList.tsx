@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, AlertCircle, Mail, MailOpen, Paperclip, RefreshCw, Trash2, X } from 'lucide-react';
+import { Archive, AlertCircle, Mail, MailOpen, Paperclip, RefreshCw, Trash2, X, MailCheck } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { MessageSummary } from '../api/types';
@@ -60,15 +60,18 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
     bulkSetRead: setReadMut,
   } = useMessageMutations(accountId, folder);
 
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+
   // Multi-select state: UIDs the user has checked for a bulk action. Anchored on
   // the last-clicked UID so Shift-click can select a contiguous range.
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
 
-  // Clear the selection outright when the account or folder changes.
+  // Clear the selection and filter when the account or folder changes.
   useEffect(() => {
     setSelected(new Set());
     setAnchor(null);
+    setShowUnreadOnly(false);
   }, [accountId, folder]);
 
   // Prefer the server's persistent sync state (survives reloads, reflects
@@ -82,7 +85,21 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
     qc.invalidateQueries({ queryKey: ['folders', accountId] });
   };
 
-  const uids = useMemo(() => data?.map((m) => m.uid) ?? [], [data]);
+  // When showing unread only, eagerly load all remaining pages so unread messages
+  // on later pages aren't hidden — the scroll sentinel may never enter the viewport
+  // when the filtered list is short.
+  useEffect(() => {
+    if (showUnreadOnly && hasMore && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [showUnreadOnly, hasMore, isFetchingNextPage, fetchNextPage]);
+
+  const displayData = useMemo(
+    () => (showUnreadOnly ? (data ?? []).filter((m) => !m.seen) : data),
+    [data, showUnreadOnly],
+  );
+
+  const uids = useMemo(() => displayData?.map((m) => m.uid) ?? [], [displayData]);
 
   // Drop selected UIDs that have left the list (synced away, moved elsewhere),
   // so a bulk action never fires against a message no longer in this folder.
@@ -208,21 +225,34 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
               </span>
             )}
           </div>
-          <button
-            onClick={refresh}
-            disabled={syncing}
-            className="rounded p-1.5 hover:bg-neutral-100 disabled:opacity-50"
-            title="Sync now"
-          >
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setShowUnreadOnly((v) => !v)}
+              title={showUnreadOnly ? 'Show all messages' : 'Show unread only'}
+              className={`rounded p-1.5 ${showUnreadOnly ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' : 'hover:bg-neutral-100 text-neutral-500'}`}
+            >
+              <MailCheck size={16} />
+            </button>
+            <button
+              onClick={refresh}
+              disabled={syncing}
+              className="rounded p-1.5 hover:bg-neutral-100 disabled:opacity-50"
+              title="Sync now"
+            >
+              <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+            </button>
+          </div>
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto">
         {isLoading && <p className="p-4 text-sm text-neutral-400">Loading…</p>}
         {isError && <p className="p-4 text-sm text-red-600">{(error as Error).message}</p>}
-        {data?.length === 0 && <p className="p-4 text-sm text-neutral-400">No messages.</p>}
+        {displayData?.length === 0 && !isFetchingNextPage && (
+          <p className="p-4 text-sm text-neutral-400">
+            {showUnreadOnly ? 'No unread messages.' : 'No messages.'}
+          </p>
+        )}
         {selecting && uids.length > 0 && (
           <button
             onClick={toggleAll}
@@ -238,7 +268,7 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
             {allSelected ? 'Deselect all' : `Select all ${uids.length}`}
           </button>
         )}
-        {data?.map((m: MessageSummary) => {
+        {displayData?.map((m: MessageSummary) => {
           const isChecked = selected.has(m.uid);
           return (
             <div
