@@ -135,6 +135,12 @@ export const api = {
       { method: 'DELETE' },
     ),
 
+  // Mark an entire folder read server-side (covers unsynced/unloaded mail too).
+  markAllRead: (accountId: string, folder: string) =>
+    request<{ ok: true }>(`/api/accounts/${accountId}/messages/read-all?${q(folder)}`, {
+      method: 'POST',
+    }),
+
   // Bulk action over many UIDs in a single request; the backend batches the IMAP
   // side and drives it through the per-account action queue.
   bulk: (

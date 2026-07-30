@@ -1,7 +1,9 @@
-import { Plus, Mail, RefreshCw, AlertCircle, Bot, ChevronRight } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Plus, Mail, MailOpen, RefreshCw, AlertCircle, Bot, ChevronRight } from 'lucide-react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import type { Account, Folder } from '../api/types';
-import { useAiStatus, useFolders, useSyncAccount } from '../hooks';
+import { useAiStatus, useFolders, useMarkFolderRead, useSyncAccount } from '../hooks';
 import { folderIcon, sortFolders } from '../lib/folders';
 
 interface Props {
@@ -107,6 +109,30 @@ function AccountBlock({
   const qc = useQueryClient();
   // Fetch folders even when collapsed so the total unread badge stays live.
   const folders = useFolders(account.id);
+  const markRead = useMarkFolderRead(account.id);
+
+  // Right-click context menu, held at the block level so only one folder's menu
+  // is ever open (right-clicking another folder just repositions it).
+  const [ctxMenu, setCtxMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  const ctxFolder = ctxMenu ? folders.data?.find((f) => f.path === ctxMenu.path) : undefined;
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setCtxMenu(null);
+    // A left-click, scroll, or resize dismisses it. (Right-click fires no click
+    // event, so opening another folder's menu goes through onOpenMenu instead.)
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [ctxMenu]);
   // Account is "syncing" while any of its folders is being synced in the
   // background, or while its folder list is being (re)fetched.
   const anyFolderSyncing = folders.data?.some((f) => f.syncStatus === 'syncing') ?? false;
@@ -177,10 +203,43 @@ function AccountBlock({
               folder={f}
               active={selectedFolder === f.path}
               onSelect={() => onSelectFolder(f.path)}
+              onOpenMenu={(x, y) => setCtxMenu({ path: f.path, x, y })}
             />
           ))}
         </div>
       )}
+
+      {ctxMenu &&
+        ctxFolder &&
+        createPortal(
+          <div
+            // Clamp to the viewport so a folder near an edge doesn't open the menu
+            // off-screen. Width matches w-52 (208px); height is a single row.
+            style={{
+              top: Math.min(ctxMenu.y, window.innerHeight - 52),
+              left: Math.min(ctxMenu.x, window.innerWidth - 216),
+            }}
+            className="fixed z-30 w-52 rounded-lg border border-neutral-200 bg-white p-1 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              disabled={ctxFolder.unseen === 0}
+              onClick={() => {
+                markRead.mutate(ctxFolder.path);
+                setCtxMenu(null);
+              }}
+              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-neutral-100 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <MailOpen size={15} className="shrink-0 text-neutral-500" />
+              <span className="flex-1">Mark all as read</span>
+              {ctxFolder.unseen > 0 && (
+                <span className="text-xs text-neutral-400">{ctxFolder.unseen}</span>
+              )}
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -190,11 +249,13 @@ function FolderRow({
   folder,
   active,
   onSelect,
+  onOpenMenu,
 }: {
   accountId: string;
   folder: Folder;
   active: boolean;
   onSelect: () => void;
+  onOpenMenu: (x: number, y: number) => void;
 }) {
   const Icon = folderIcon(folder);
   // Syncing = server reports background sync in progress, or the client is
@@ -205,6 +266,10 @@ function FolderRow({
   return (
     <button
       onClick={onSelect}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onOpenMenu(e.clientX, e.clientY);
+      }}
       title={folder.syncError ?? undefined}
       className={`flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm ${
         active ? 'bg-neutral-200 text-neutral-900' : 'hover:bg-neutral-100'

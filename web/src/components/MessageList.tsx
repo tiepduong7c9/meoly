@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, AlertCircle, Mail, MailOpen, Paperclip, RefreshCw, Trash2, X, MailCheck } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Archive, AlertCircle, FolderInput, Mail, MailOpen, Paperclip, RefreshCw, Trash2, X, MailCheck } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { MessageSummary } from '../api/types';
+import type { Folder, MessageSummary } from '../api/types';
 import { MESSAGE_PAGE_SIZE, useFolders, useFilteredMessages, useMessageMutations } from '../hooks';
+import { folderIcon, sortFolders } from '../lib/folders';
 import { MoveMenu } from './MoveMenu';
 
 // SQLite datetime('now') is space-separated UTC without a zone; normalize it.
@@ -69,6 +71,9 @@ export function MessageList({
   const meta = folders?.find((f) => f.path === folder);
   const qc = useQueryClient();
   const {
+    archive: archiveOne,
+    remove: removeOne,
+    move: moveOne,
     bulkArchive: archiveMut,
     bulkMove: moveMut,
     bulkRemove: removeMut,
@@ -79,6 +84,10 @@ export function MessageList({
   // the last-clicked UID so Shift-click can select a contiguous range.
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
+  // UID of the row whose hover "Move" menu is open. Kept here (not inside the
+  // row) so the row's action bar stays visible while its menu is open, even
+  // after the pointer leaves the row to reach the dropdown.
+  const [moveMenuUid, setMoveMenuUid] = useState<number | null>(null);
 
   // Clear the selection when the account or folder changes. (The unread filter is
   // reset by App, which owns that state.)
@@ -210,6 +219,22 @@ export function MessageList({
   const bulkDelete = () => runBulk((uids) => removeMut.mutate({ uids }), true);
   const bulkMove = (target: string) => runBulk((uids) => moveMut.mutate({ uids, target }), true);
 
+  // Per-row quick actions (revealed on hover). These use the single-message
+  // mutations; each drops the row, so clear the open message if it was the one
+  // acted on. stopPropagation (in the buttons) keeps the click off the row.
+  const quickArchive = (m: MessageSummary) => {
+    archiveOne.mutate({ uid: m.uid });
+    if (selectedUid === m.uid) onSelect(null);
+  };
+  const quickDelete = (m: MessageSummary) => {
+    removeOne.mutate({ uid: m.uid });
+    if (selectedUid === m.uid) onSelect(null);
+  };
+  const quickMove = (m: MessageSummary, target: string) => {
+    moveOne.mutate({ uid: m.uid, target });
+    if (selectedUid === m.uid) onSelect(null);
+  };
+
   const selecting = selected.size > 0;
 
   return (
@@ -303,11 +328,18 @@ export function MessageList({
         )}
         {displayData?.map((m: MessageSummary) => {
           const isChecked = selected.has(m.uid);
+          // The gradient fade behind the hover actions matches the row's own
+          // background so the buttons read as sitting on the row, not floating.
+          const fadeFrom = isChecked
+            ? 'from-blue-50'
+            : selectedUid === m.uid
+              ? 'from-neutral-100'
+              : 'from-neutral-50';
           return (
             <div
               key={m.uid}
               ref={selectedUid === m.uid ? selectedRef : undefined}
-              className={`group flex items-start border-b border-neutral-100 ${
+              className={`group relative flex items-start border-b border-neutral-100 ${
                 isChecked ? 'bg-blue-50' : selectedUid === m.uid ? 'bg-neutral-100' : 'hover:bg-neutral-50'
               }`}
             >
@@ -350,6 +382,32 @@ export function MessageList({
                   {m.hasAttachments && <Paperclip size={13} className="ml-auto shrink-0 text-neutral-400" />}
                 </div>
               </button>
+              {/* Quick actions, revealed on row hover. Hidden while a bulk
+                  selection is active so the two workflows don't overlap. Stays
+                  pinned visible while this row's Move menu is open. */}
+              {!selecting && (
+                <div
+                  className={`absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l to-transparent pl-10 pr-2 transition-opacity ${fadeFrom} ${
+                    moveMenuUid === m.uid
+                      ? 'opacity-100'
+                      : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
+                  }`}
+                >
+                  <RowMoveMenu
+                    folders={folders ?? []}
+                    currentFolder={folder}
+                    open={moveMenuUid === m.uid}
+                    onOpenChange={(o) => setMoveMenuUid(o ? m.uid : null)}
+                    onMove={(target) => quickMove(m, target)}
+                  />
+                  <QuickAction title="Archive" onClick={() => quickArchive(m)}>
+                    <Archive size={16} />
+                  </QuickAction>
+                  <QuickAction title="Delete" onClick={() => quickDelete(m)}>
+                    <Trash2 size={16} />
+                  </QuickAction>
+                </div>
+              )}
             </div>
           );
         })}
@@ -381,6 +439,143 @@ function BulkButton({
     >
       {children}
     </button>
+  );
+}
+
+// A single hover-revealed quick action on a message row. stopPropagation keeps
+// the click from bubbling to the row's open/select handlers.
+function QuickAction({
+  children,
+  title,
+  onClick,
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="rounded-md p-1.5 text-neutral-600 hover:bg-neutral-200 hover:text-neutral-900"
+    >
+      {children}
+    </button>
+  );
+}
+
+// Compact, icon-only "Move to folder" menu for a message row's hover actions.
+// The dropdown renders in a portal with fixed positioning so it isn't clipped
+// by the message list's scroll container. `open` is controlled by the parent so
+// the row's action bar can stay visible while the menu is open.
+function RowMoveMenu({
+  folders,
+  currentFolder,
+  open,
+  onOpenChange,
+  onMove,
+}: {
+  folders: Folder[];
+  currentFolder: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onMove: (target: string) => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      onOpenChange(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onOpenChange(false);
+    // The menu is fixed-positioned from a one-time rect, so close it on scroll or
+    // resize rather than let it float away from its button.
+    const close = () => onOpenChange(false);
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open, onOpenChange]);
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      // Right-align the 224px (w-56) menu under the button, clamped to the
+      // viewport; flip above the button when it would overflow the bottom.
+      const MENU_W = 224;
+      const MENU_H = 320; // max-h-80
+      const left = Math.max(8, Math.min(r.right - MENU_W, window.innerWidth - MENU_W - 8));
+      const top =
+        r.bottom + 4 + MENU_H > window.innerHeight
+          ? Math.max(8, r.top - MENU_H - 4)
+          : r.bottom + 4;
+      setPos({ top, left });
+    }
+    onOpenChange(!open);
+  };
+
+  const targets = sortFolders(folders.filter((f) => f.path !== currentFolder));
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        title="Move to folder"
+        onClick={toggle}
+        className="rounded-md p-1.5 text-neutral-600 hover:bg-neutral-200 hover:text-neutral-900"
+      >
+        <FolderInput size={16} />
+      </button>
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={menuRef}
+            style={{ top: pos.top, left: pos.left }}
+            className="fixed z-30 max-h-80 w-56 overflow-y-auto rounded-lg border border-neutral-200 bg-white p-1 shadow-lg"
+          >
+            {targets.map((f) => {
+              const Icon = folderIcon(f);
+              return (
+                <button
+                  key={f.path}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMove(f.path);
+                    onOpenChange(false);
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-neutral-100"
+                >
+                  <Icon size={15} className="shrink-0 text-neutral-500" />
+                  <span className="flex-1 truncate">{f.name}</span>
+                  {f.unseen > 0 && (
+                    <span className="rounded-full bg-neutral-200 px-1.5 text-xs text-neutral-600">
+                      {f.unseen}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

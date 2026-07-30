@@ -6,6 +6,7 @@ import {
   archiveMessage,
   deleteMany,
   deleteMessage,
+  markAllSeen,
   markSeen,
   markSeenMany,
   moveMany,
@@ -90,6 +91,14 @@ messagesRouter.post('/bulk', async (req, res) => {
       return;
     }
   }
+});
+
+// Mark the whole folder read in one search-based IMAP command. Registered before
+// `/:uid` so "read-all" isn't captured as a message id.
+messagesRouter.post('/read-all', async (req, res) => {
+  const { accountId, folder } = ctx(req);
+  await markAllSeen(accountId, folder);
+  res.json({ ok: true });
 });
 
 messagesRouter.get('/:uid', async (req, res) => {
