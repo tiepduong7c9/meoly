@@ -83,6 +83,51 @@ const setSeenManyInCache = db.transaction(
   },
 );
 
+const listUnseenUids = db.prepare(
+  'SELECT uid FROM messages WHERE account_id = ? AND folder_path = ? AND seen = 0',
+);
+const zeroFolderUnseen = db.prepare(
+  'UPDATE folders SET unseen = 0 WHERE account_id = ? AND path = ?',
+);
+
+/** Mark every cached unseen row in a folder as seen and zero its unread count. */
+const markAllSeenInCache = db.transaction((accountId: string, path: string) => {
+  const rows = listUnseenUids.all(accountId, path) as { uid: number }[];
+  for (const { uid } of rows) {
+    const current = getSeenStmt.get(accountId, path, uid) as
+      | { flags: string | null; seen: number }
+      | undefined;
+    if (!current) continue;
+    const flags = new Set<string>(current.flags ? JSON.parse(current.flags) : []);
+    flags.add('\\Seen');
+    setSeen.run({
+      account_id: accountId,
+      folder_path: path,
+      uid,
+      seen: 1,
+      flags: JSON.stringify(Array.from(flags)),
+    });
+  }
+  // Set to 0 outright rather than by delta: the server's unseen total may exceed
+  // the cached unseen rows (unsynced mail), and after this op none remain unread.
+  zeroFolderUnseen.run(accountId, path);
+});
+
+/**
+ * Mark an entire folder read by adding \Seen to every unseen message in one
+ * search-based IMAP command, then reconcile the local cache. No-ops server-side
+ * when nothing is unread.
+ */
+export async function markAllSeen(accountId: string, path: string): Promise<void> {
+  await enqueueAction(accountId, async () => {
+    await withMailbox(accountId, path, async (client) => {
+      // Search query { seen: false } targets UNSEEN; no UID list to enumerate.
+      await client.messageFlagsAdd({ seen: false }, ['\\Seen']);
+    });
+  });
+  markAllSeenInCache(accountId, path);
+}
+
 /**
  * Mark many messages read/unread by toggling \Seen. Batched into one IMAP
  * command per chunk, serialized through the account action queue.

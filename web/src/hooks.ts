@@ -41,12 +41,16 @@ export function useDeleteAccount() {
 }
 
 export function useFolders(accountId: string | null) {
+  // Pause polling while a mark-all-read is applying: the server only updates the
+  // DB after its (multi-second) IMAP op, so a mid-op refetch would read the
+  // pre-update unread count and overwrite the optimistic zeroed badge.
+  const marking = useIsMutating({ mutationKey: ['mark-folder-read', accountId] });
   return useQuery({
     queryKey: ['folders', accountId],
     queryFn: () => api.listFolders(accountId!),
     enabled: !!accountId,
     // Poll so background-sync progress (counts, status, last-synced) shows live.
-    refetchInterval: 6_000,
+    refetchInterval: marking > 0 ? false : 6_000,
   });
 }
 
@@ -170,6 +174,40 @@ export function useFilteredMessages(
 
 export function useSyncAccount() {
   return useMutation({ mutationFn: (id: string) => api.syncAccount(id) });
+}
+
+// Mark a whole folder read. Optimistically zeroes the folder's unread badge and
+// flips its loaded message rows to seen, then reconciles against the server.
+export function useMarkFolderRead(accountId: string) {
+  const qc = useQueryClient();
+  const foldersKey = ['folders', accountId];
+  return useMutation({
+    // Keyed so useFolders can pause its poll while this is in flight.
+    mutationKey: ['mark-folder-read', accountId],
+    mutationFn: (folder: string) => api.markAllRead(accountId, folder),
+    onMutate: async (folder) => {
+      await qc.cancelQueries({ queryKey: foldersKey });
+      const prevFolders = qc.getQueryData<Folder[]>(foldersKey);
+      qc.setQueryData<Folder[]>(foldersKey, (old) =>
+        old?.map((f) => (f.path === folder ? { ...f, unseen: 0 } : f)),
+      );
+      // Flip the loaded rows of both the full and unread lists for this folder.
+      for (const unseenOnly of [false, true]) {
+        qc.setQueryData<MessagePages>(messagesKey(accountId, folder, unseenOnly), (old) =>
+          old ? { ...old, pages: old.pages.map((p) => p.map((m) => ({ ...m, seen: true }))) } : old,
+        );
+      }
+      return { prevFolders };
+    },
+    onError: (err, _folder, ctx) => {
+      if (ctx?.prevFolders) qc.setQueryData(foldersKey, ctx.prevFolders);
+      alert((err as Error).message);
+    },
+    onSettled: (_data, _err, folder) => {
+      qc.invalidateQueries({ queryKey: foldersKey });
+      qc.invalidateQueries({ queryKey: ['messages', accountId, folder] });
+    },
+  });
 }
 
 export function useMessage(
