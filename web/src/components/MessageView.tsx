@@ -111,14 +111,20 @@ export function MessageView({ accountId, folder, uid, folders, onClose, showUnre
   );
 }
 
+function injectBaseTarget(html: string): string {
+  const base = '<base target="_blank" rel="noopener noreferrer">';
+  return html.includes('<head') ? html.replace(/(<head[^>]*>)/i, `$1${base}`) : base + html;
+}
+
 export function MessageBody({ html, text }: { html: string | null; text: string | null }) {
   if (html) {
     // Render untrusted HTML inside a sandboxed iframe (no scripts, no same-origin).
+    // allow-popups lets links open in new tabs; base target="_blank" covers links without explicit target.
     return (
       <iframe
         title="message"
-        sandbox=""
-        srcDoc={html}
+        sandbox="allow-popups allow-popups-to-escape-sandbox"
+        srcDoc={injectBaseTarget(html)}
         className="h-[60vh] w-full border-0"
       />
     );
