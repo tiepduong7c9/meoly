@@ -2,9 +2,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { getMessage, listMessages } from '../services/messages.js';
 import {
+  archiveMany,
   archiveMessage,
+  deleteMany,
   deleteMessage,
   markSeen,
+  markSeenMany,
+  moveMany,
   moveMessage,
 } from '../imap/operations.js';
 import { syncFolderInBackground } from '../imap/scheduler.js';
@@ -33,6 +37,58 @@ messagesRouter.get('/', async (req, res) => {
   const refresh = req.query.refresh === 'true' && !offset;
   const messages = await listMessages(accountId, folder, { limit, offset, refresh });
   res.json(messages);
+});
+
+const bulkSchema = z.object({
+  action: z.enum(['read', 'unread', 'archive', 'move', 'delete']),
+  uids: z.array(z.number().int().positive()).min(1),
+  target: z.string().min(1).optional(),
+  hard: z.boolean().optional(),
+});
+
+// Bulk action over many UIDs in one request. The backend batches them into a
+// single IMAP command per chunk (via the *Many ops) and drives them through the
+// per-account action queue. Registered before `/:uid` so it isn't captured as an id.
+messagesRouter.post('/bulk', async (req, res) => {
+  const { accountId, folder } = ctx(req);
+  const parsed = bulkSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Expected { action: read|unread|archive|move|delete, uids: number[], target?, hard? }',
+    });
+    return;
+  }
+  const { action, uids, target, hard } = parsed.data;
+
+  switch (action) {
+    case 'read':
+    case 'unread':
+      await markSeenMany(accountId, folder, uids, action === 'read');
+      res.json({ ok: true, count: uids.length });
+      return;
+    case 'archive': {
+      const dest = await archiveMany(accountId, folder, uids);
+      syncFolderInBackground(accountId, dest);
+      res.json({ ok: true, target: dest, count: uids.length });
+      return;
+    }
+    case 'move': {
+      if (!target) {
+        res.status(400).json({ error: 'move requires a target folder' });
+        return;
+      }
+      await moveMany(accountId, folder, uids, target);
+      syncFolderInBackground(accountId, target);
+      res.json({ ok: true, target, count: uids.length });
+      return;
+    }
+    case 'delete': {
+      const result = await deleteMany(accountId, folder, uids, hard ?? false);
+      if (result.target) syncFolderInBackground(accountId, result.target);
+      res.json({ ok: true, ...result, count: uids.length });
+      return;
+    }
+  }
 });
 
 messagesRouter.get('/:uid', async (req, res) => {

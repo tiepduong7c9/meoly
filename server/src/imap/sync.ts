@@ -1,6 +1,7 @@
 import { simpleParser } from 'mailparser';
 import { db } from '../db/index.js';
 import { getClient, withMailbox } from './pool.js';
+import { pendingSet } from './actionQueue.js';
 import type { Attachment } from '../types.js';
 
 const ENVELOPE_CHUNK = 300; // UIDs per envelope fetch
@@ -193,6 +194,13 @@ export async function syncFolderFull(accountId: string, path: string): Promise<v
       }
       const serverUids = new Set(serverFlags.keys());
 
+      // UIDs whose removal is queued but not yet confirmed on the server. They
+      // are still listed by the server, so exclude them from the step-5 re-insert
+      // — otherwise a mid-flight sync would resurrect a message the user just
+      // archived/moved/deleted. (Step 3/4/6 stay as-is: any cached row is dropped,
+      // and counts decremented, by the removal job itself.)
+      const pending = pendingSet(accountId, path);
+
       // 2. Cached state.
       const cachedRows = db
         .prepare('SELECT uid, flags FROM messages WHERE account_id = ? AND folder_path = ?')
@@ -239,8 +247,10 @@ export async function syncFolderFull(accountId: string, path: string): Promise<v
         })();
       }
 
-      // 5. Fetch envelopes for new messages (chunked).
-      const newUids = [...serverUids].filter((u) => !cachedUids.has(u)).sort((a, b) => a - b);
+      // 5. Fetch envelopes for new messages (chunked), skipping pending removals.
+      const newUids = [...serverUids]
+        .filter((u) => !cachedUids.has(u) && !pending.has(u))
+        .sort((a, b) => a - b);
       for (let i = 0; i < newUids.length; i += ENVELOPE_CHUNK) {
         const chunk = newUids.slice(i, i + ENVELOPE_CHUNK);
         const rows: Array<Record<string, unknown>> = [];
@@ -274,7 +284,12 @@ export async function syncFolderFull(accountId: string, path: string): Promise<v
         })();
       }
 
-      // 6. Recompute unseen from authoritative server flags.
+      // 6. Recompute unseen from authoritative server flags. Counts are NOT
+      //    adjusted for pending removals here — dropManyFromCache (operations.ts)
+      //    owns that decrement when the removal lands. Subtracting pending here as
+      //    well would double-count and leave the folder undercounted until the next
+      //    sync. A pending message may briefly appear in the badge but not the list
+      //    (readMessages hides it); that resolves the instant the removal completes.
       const unseen = [...serverFlags.values()].filter((f) => !f.includes('\\Seen')).length;
       db.prepare('UPDATE folders SET unseen = ? WHERE account_id = ? AND path = ?').run(
         unseen,

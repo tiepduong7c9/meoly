@@ -134,6 +134,23 @@ export const api = {
       { method: 'DELETE' },
     ),
 
+  // Bulk action over many UIDs in a single request; the backend batches the IMAP
+  // side and drives it through the per-account action queue.
+  bulk: (
+    accountId: string,
+    folder: string,
+    body: {
+      action: 'read' | 'unread' | 'archive' | 'move' | 'delete';
+      uids: number[];
+      target?: string;
+      hard?: boolean;
+    },
+  ) =>
+    request<{ ok: true; target?: string; trashed?: boolean; count: number }>(
+      `/api/accounts/${accountId}/messages/bulk?${q(folder)}`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
   // --- AI triage ---
   aiStatus: () => request<AiStatus>('/api/ai/status'),
 

@@ -53,7 +53,12 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
   const { data: folders } = useFolders(accountId);
   const meta = folders?.find((f) => f.path === folder);
   const qc = useQueryClient();
-  const { move, archive, remove, setRead } = useMessageMutations(accountId, folder);
+  const {
+    bulkArchive: archiveMut,
+    bulkMove: moveMut,
+    bulkRemove: removeMut,
+    bulkSetRead: setReadMut,
+  } = useMessageMutations(accountId, folder);
 
   // Multi-select state: UIDs the user has checked for a bulk action. Anchored on
   // the last-clicked UID so Shift-click can select a contiguous range.
@@ -140,20 +145,20 @@ export function MessageList({ accountId, folder, selectedUid, onSelect }: Props)
     setAnchor(null);
   };
 
-  // Fire a per-message mutation for every selected UID. The mutation layer
-  // already pauses polling and debounces the authoritative refetch across the
-  // whole burst, so looping here is safe and reuses the optimistic updates.
-  const runBulk = (fn: (uid: number) => void, removes: boolean) => {
-    const uidsToAct = Array.from(selected);
-    uidsToAct.forEach(fn);
+  // Send the whole selection to the backend in a single bulk request; the server
+  // batches the IMAP side and drives it through its per-account action queue.
+  const runBulk = (fire: (uids: number[]) => void, removes: boolean) => {
+    const uids = Array.from(selected);
+    if (uids.length === 0) return;
+    fire(uids);
     if (removes && selectedUid != null && selected.has(selectedUid)) onSelect(null);
     clearSelection();
   };
 
-  const bulkRead = (seen: boolean) => runBulk((uid) => setRead.mutate({ uid, seen }), false);
-  const bulkArchive = () => runBulk((uid) => archive.mutate({ uid }), true);
-  const bulkDelete = () => runBulk((uid) => remove.mutate({ uid }), true);
-  const bulkMove = (target: string) => runBulk((uid) => move.mutate({ uid, target }), true);
+  const bulkRead = (seen: boolean) => runBulk((uids) => setReadMut.mutate({ uids, seen }), false);
+  const bulkArchive = () => runBulk((uids) => archiveMut.mutate({ uids }), true);
+  const bulkDelete = () => runBulk((uids) => removeMut.mutate({ uids }), true);
+  const bulkMove = (target: string) => runBulk((uids) => moveMut.mutate({ uids, target }), true);
 
   const selecting = selected.size > 0;
 
