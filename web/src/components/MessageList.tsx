@@ -395,6 +395,12 @@ export function MessageList({
                       : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
                   }`}
                 >
+                  <QuickAction title="Archive" onClick={() => quickArchive(m)}>
+                    <Archive size={16} />
+                  </QuickAction>
+                  <QuickAction title="Delete" danger onClick={() => quickDelete(m)}>
+                    <Trash2 size={16} />
+                  </QuickAction>
                   <RowMoveMenu
                     folders={folders ?? []}
                     currentFolder={folder}
@@ -402,12 +408,6 @@ export function MessageList({
                     onOpenChange={(o) => setMoveMenuUid(o ? m.uid : null)}
                     onMove={(target) => quickMove(m, target)}
                   />
-                  <QuickAction title="Archive" onClick={() => quickArchive(m)}>
-                    <Archive size={16} />
-                  </QuickAction>
-                  <QuickAction title="Delete" danger onClick={() => quickDelete(m)}>
-                    <Trash2 size={16} />
-                  </QuickAction>
                 </div>
               )}
             </div>
