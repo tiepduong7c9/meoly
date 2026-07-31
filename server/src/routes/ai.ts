@@ -11,7 +11,7 @@ import {
   updateAccountSettings,
   updateGlobalSettings,
 } from '../ai/store.js';
-import { applyDecision, applyDecisionsBatch } from '../ai/executor.js';
+import { applyDecision, applyDecisionsBatch, overrideDecision } from '../ai/executor.js';
 import type { AiSuggestionStatus } from '../types.js';
 import { queueDepth, triageAccount, triageAllAccounts } from '../ai/triage.js';
 import { triggerAiTriage } from '../ai/scheduler.js';
@@ -100,6 +100,26 @@ aiRouter.post('/suggestions/:id/decision', async (req, res) => {
     return;
   }
   const result = await applyDecision(req.params.id, parsed.data.action, 'web');
+  res.json({ ok: true, ...result });
+});
+
+const overrideSchema = z.object({
+  action: z.enum(['keep', 'mark_read', 'archive', 'delete']),
+});
+
+// Re-action an already-applied suggestion (typically an auto-applied one): apply a
+// different action, re-locating the message by Message-ID since it may have moved.
+aiRouter.post('/suggestions/:id/override', async (req, res) => {
+  const parsed = overrideSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Expected { action: keep|mark_read|archive|delete }' });
+    return;
+  }
+  if (!getSuggestion(req.params.id)) {
+    res.status(404).json({ error: 'Suggestion not found' });
+    return;
+  }
+  const result = await overrideDecision(req.params.id, parsed.data.action, 'web');
   res.json({ ok: true, ...result });
 });
 

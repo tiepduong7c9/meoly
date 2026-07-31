@@ -6,9 +6,18 @@ import {
   deleteMessage,
   markSeen,
   markSeenMany,
+  moveMessage,
 } from '../imap/operations.js';
 import { syncFolderInBackground } from '../imap/scheduler.js';
-import { getSuggestion, transition, type AiAccountSettings, type AiSuggestion } from './store.js';
+import {
+  findMessageLocation,
+  getSuggestion,
+  isTrashFolder,
+  recordOverride,
+  transition,
+  type AiAccountSettings,
+  type AiSuggestion,
+} from './store.js';
 import type { AiAction, AiDecisionSource } from '../types.js';
 
 /** Perform the IMAP side of an action — unless the global dry-run switch is on,
@@ -217,6 +226,106 @@ export async function applyDecisionsBatch(
   }
 
   return ids.map((id) => results.get(id) ?? { id, error: 'not found' });
+}
+
+interface Location {
+  folderPath: string;
+  uid: number;
+  seen?: boolean;
+}
+
+/**
+ * Bring a message to the end-state implied by `action`, starting from its current
+ * location. The read flag is set first: it doesn't change the UID, so a following
+ * move stays valid (whereas a move renames the UID and we wouldn't know the new one).
+ */
+async function performOverride(
+  accountId: string,
+  loc: Location,
+  origin: string,
+  action: AiAction,
+): Promise<void> {
+  if (action === 'keep' || action === 'mark_read') {
+    const wantSeen = action === 'mark_read';
+    if (loc.seen !== wantSeen) await markSeen(accountId, loc.folderPath, loc.uid, wantSeen);
+    if (loc.folderPath !== origin) {
+      const dest = await moveMessage(accountId, loc.folderPath, loc.uid, origin);
+      syncFolderInBackground(accountId, dest);
+    }
+  } else if (action === 'archive') {
+    const dest = await archiveMessage(accountId, loc.folderPath, loc.uid);
+    syncFolderInBackground(accountId, dest);
+  } else if (action === 'delete') {
+    // If it already lives in Trash, a soft delete would permanently expunge it —
+    // skip, since "delete" here means "move to Trash", not "destroy".
+    if (!isTrashFolder(accountId, loc.folderPath)) {
+      const res = await deleteMessage(accountId, loc.folderPath, loc.uid, false); // soft → Trash
+      if (res.target) syncFolderInBackground(accountId, res.target);
+    }
+  }
+  syncFolderInBackground(accountId, loc.folderPath);
+}
+
+/**
+ * Override the action of an already-applied suggestion. The message has likely
+ * moved (and changed UID) since the auto-action, so it is re-located by Message-ID
+ * before the new action is applied from wherever it now lives. The suggestion row
+ * is re-stamped with the new action; IMAP failure lands it in `error`.
+ */
+export async function overrideDecision(
+  id: string,
+  action: AiAction,
+  source: AiDecisionSource,
+): Promise<DecisionResult> {
+  const s = getSuggestion(id);
+  if (!s) throw new Error('Suggestion not found');
+  if (s.status !== 'applied') throw new Error('Only applied suggestions can be overridden');
+
+  // Resolve the target location before mutating anything. Prefer the live position
+  // by Message-ID (the message may have moved and changed UID). Only fall back to
+  // the original triage spot when the prior action left it in place — if the prior
+  // action moved it (archive/delete) and we can't find it, acting on the stale
+  // UID would silently no-op while reporting success, so fail loudly instead.
+  const located = s.messageId ? findMessageLocation(s.accountId, s.messageId) : undefined;
+  let loc: Location;
+  if (located) {
+    loc = located;
+  } else if (s.appliedAction === 'archive' || s.appliedAction === 'delete') {
+    throw new Error('Cannot locate the message to override; it has moved since the action');
+  } else {
+    loc = { folderPath: s.folderPath, uid: s.uid };
+  }
+
+  if (env.ai.dryRun) {
+    recordOverride(id, action, source, true);
+    return { status: 'applied', applied: false, dryRun: true, alreadyResolved: false };
+  }
+
+  // Claim the row (applied → approved) so a concurrent override can't double-apply;
+  // mirrors the claim in applyDecision. The loser is a no-op, not a second mutation.
+  const claimed = transition(id, {
+    status: 'approved',
+    expectedStatus: 'applied',
+    source,
+    reviewed: true,
+  });
+  if (!claimed) {
+    return {
+      status: getSuggestion(id)?.status ?? s.status,
+      applied: false,
+      dryRun: false,
+      alreadyResolved: true,
+    };
+  }
+
+  try {
+    await performOverride(s.accountId, loc, s.folderPath, action);
+    recordOverride(id, action, source, false);
+    return { status: 'applied', applied: true, dryRun: false, alreadyResolved: false };
+  } catch (err) {
+    transition(id, { status: 'error', expectedStatus: 'approved', error: (err as Error).message });
+    throw err;
+  }
 }
 
 /** Whether a fresh suggestion qualifies for hands-off auto-apply. */
