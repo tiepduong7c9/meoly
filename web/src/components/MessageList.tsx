@@ -330,11 +330,13 @@ export function MessageList({
           const isChecked = selected.has(m.uid);
           // The gradient fade behind the hover actions matches the row's own
           // background so the buttons read as sitting on the row, not floating.
+          // The `via` stop keeps the button area fully opaque (hiding the
+          // subject text beneath it); only the narrow left strip fades out.
           const fadeFrom = isChecked
-            ? 'from-blue-50'
+            ? 'from-blue-50 via-blue-50'
             : selectedUid === m.uid
-              ? 'from-neutral-100'
-              : 'from-neutral-50';
+              ? 'from-neutral-100 via-neutral-100'
+              : 'from-neutral-50 via-neutral-50';
           return (
             <div
               key={m.uid}
@@ -364,7 +366,7 @@ export function MessageList({
               </div>
               <button
                 onClick={() => onSelect(m.uid)}
-                className="flex min-w-0 flex-1 flex-col gap-0.5 py-3 pr-4 pl-0 text-left"
+                className="flex min-w-0 flex-1 flex-col gap-0.5 py-3 pr-4 pl-0 text-left focus:outline-none"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span
@@ -387,7 +389,7 @@ export function MessageList({
                   pinned visible while this row's Move menu is open. */}
               {!selecting && (
                 <div
-                  className={`absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l to-transparent pl-10 pr-2 transition-opacity ${fadeFrom} ${
+                  className={`absolute inset-y-0 right-0 flex items-center gap-1 bg-gradient-to-l via-80% to-transparent pl-10 pr-2 transition-opacity ${fadeFrom} ${
                     moveMenuUid === m.uid
                       ? 'opacity-100'
                       : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
@@ -403,7 +405,7 @@ export function MessageList({
                   <QuickAction title="Archive" onClick={() => quickArchive(m)}>
                     <Archive size={16} />
                   </QuickAction>
-                  <QuickAction title="Delete" onClick={() => quickDelete(m)}>
+                  <QuickAction title="Delete" danger onClick={() => quickDelete(m)}>
                     <Trash2 size={16} />
                   </QuickAction>
                 </div>
@@ -442,15 +444,24 @@ function BulkButton({
   );
 }
 
+// Shared styling for the hover-revealed row action buttons. A white pill with a
+// border and shadow so the icons read as raised controls over the row's
+// gradient fade rather than blending into it.
+const QUICK_ACTION_BASE =
+  'rounded-md border border-neutral-200 bg-white p-1.5 text-neutral-700 shadow-sm transition-colors';
+
 // A single hover-revealed quick action on a message row. stopPropagation keeps
-// the click from bubbling to the row's open/select handlers.
+// the click from bubbling to the row's open/select handlers. `danger` gives
+// destructive actions (Delete) a red hover state.
 function QuickAction({
   children,
   title,
+  danger,
   onClick,
 }: {
   children: React.ReactNode;
   title: string;
+  danger?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -460,7 +471,11 @@ function QuickAction({
         e.stopPropagation();
         onClick();
       }}
-      className="rounded-md p-1.5 text-neutral-600 hover:bg-neutral-200 hover:text-neutral-900"
+      className={`${QUICK_ACTION_BASE} ${
+        danger
+          ? 'hover:border-red-300 hover:bg-red-600 hover:text-white'
+          : 'hover:border-neutral-800 hover:bg-neutral-800 hover:text-white'
+      }`}
     >
       {children}
     </button>
@@ -537,7 +552,11 @@ function RowMoveMenu({
         ref={btnRef}
         title="Move to folder"
         onClick={toggle}
-        className="rounded-md p-1.5 text-neutral-600 hover:bg-neutral-200 hover:text-neutral-900"
+        className={`${QUICK_ACTION_BASE} ${
+          open
+            ? 'border-neutral-800 bg-neutral-800 text-white'
+            : 'hover:border-neutral-800 hover:bg-neutral-800 hover:text-white'
+        }`}
       >
         <FolderInput size={16} />
       </button>
