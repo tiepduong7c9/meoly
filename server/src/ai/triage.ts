@@ -52,6 +52,7 @@ async function triageMessage(
   msg: MessageRow,
   settings: AiAccountSettings,
   model: string,
+  systemPrompt: string | null,
 ): Promise<AiSuggestion | undefined> {
   // Skip if it was triaged between the query and now (concurrent pass).
   if (hasSuggestion(msg.account_id, msg.folder_path, msg.uid)) return undefined;
@@ -59,13 +60,16 @@ async function triageMessage(
   const body = await fetchBody(msg.account_id, msg.folder_path, msg.uid); // BODY.PEEK
   const text = body.text ?? (body.html ? htmlToText(body.html) : null);
 
-  const result = await classify({
-    subject: msg.subject,
-    fromName: msg.from_name,
-    fromAddr: msg.from_addr,
-    folder: msg.folder_path,
-    body: text,
-  });
+  const result = await classify(
+    {
+      subject: msg.subject,
+      fromName: msg.from_name,
+      fromAddr: msg.from_addr,
+      folder: msg.folder_path,
+      body: text,
+    },
+    { systemPrompt, instructions: settings.customInstructions },
+  );
 
   const created = createSuggestion({
     accountId: msg.account_id,
@@ -115,6 +119,7 @@ export async function triageAccount(
   supersedeResolved(accountId);
 
   const resolvedModel = gs.llmModel ?? env.ai.model;
+  const resolvedPrompt = gs.classifyPrompt;
   const limit = opts.perFolderLimit ?? 50;
   for (const folder of settings.targetFolders) {
     const messages = unclassifiedUnread(accountId, folder, limit);
@@ -122,7 +127,7 @@ export async function triageAccount(
 
     const tasks = messages.map((msg) =>
       queue
-        .run(() => triageMessage(msg, settings, resolvedModel))
+        .run(() => triageMessage(msg, settings, resolvedModel, resolvedPrompt))
         .then((s) => {
           if (s) result.created.push(s);
         })

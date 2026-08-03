@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
 import { env } from '../env.js';
+import { DEFAULT_CLASSIFY_PROMPT } from './classifier.js';
 import type {
   AiAccountSettingsRow,
   AiAction,
@@ -18,6 +19,7 @@ export interface AiGlobalSettings {
   llmApiBaseUrl: string | null;
   llmApiKey: string | null;
   llmModel: string | null;
+  classifyPrompt: string | null;
   telegramBotToken: string | null;
   telegramChatId: string | null;
 }
@@ -28,6 +30,7 @@ interface AiGlobalSettingsRow {
   llm_api_base_url: string | null;
   llm_api_key: string | null;
   llm_model: string | null;
+  classify_prompt: string | null;
   telegram_bot_token: string | null;
   telegram_chat_id: string | null;
 }
@@ -38,6 +41,7 @@ function toGlobalSettings(r: AiGlobalSettingsRow): AiGlobalSettings {
     llmApiBaseUrl: r.llm_api_base_url,
     llmApiKey: r.llm_api_key,
     llmModel: r.llm_model,
+    classifyPrompt: r.classify_prompt,
     telegramBotToken: r.telegram_bot_token,
     telegramChatId: r.telegram_chat_id,
   };
@@ -46,23 +50,46 @@ function toGlobalSettings(r: AiGlobalSettingsRow): AiGlobalSettings {
 const selectGlobal = db.prepare('SELECT * FROM ai_global_settings WHERE id = 1');
 const upsertGlobal = db.prepare(`
   INSERT INTO ai_global_settings
-    (id, paused, llm_api_base_url, llm_api_key, llm_model, telegram_bot_token, telegram_chat_id)
-  VALUES (1, @paused, @llm_api_base_url, @llm_api_key, @llm_model, @telegram_bot_token, @telegram_chat_id)
+    (id, paused, llm_api_base_url, llm_api_key, llm_model, classify_prompt, telegram_bot_token, telegram_chat_id)
+  VALUES (1, @paused, @llm_api_base_url, @llm_api_key, @llm_model, @classify_prompt, @telegram_bot_token, @telegram_chat_id)
   ON CONFLICT(id) DO UPDATE SET
     paused             = @paused,
     llm_api_base_url   = @llm_api_base_url,
     llm_api_key        = @llm_api_key,
     llm_model          = @llm_model,
+    classify_prompt    = @classify_prompt,
     telegram_bot_token = @telegram_bot_token,
     telegram_chat_id   = @telegram_chat_id
 `);
 
+const GLOBAL_DEFAULTS: AiGlobalSettings = {
+  paused: false,
+  llmApiBaseUrl: null,
+  llmApiKey: null,
+  llmModel: null,
+  classifyPrompt: null,
+  telegramBotToken: null,
+  telegramChatId: null,
+};
+
 export function getGlobalSettings(): AiGlobalSettings {
   const row = selectGlobal.get() as AiGlobalSettingsRow | undefined;
   if (row) return toGlobalSettings(row);
-  // Lazy-seed with all-null (fall back to env everywhere).
-  upsertGlobal.run({ paused: 0, llm_api_base_url: null, llm_api_key: null, llm_model: null, telegram_bot_token: null, telegram_chat_id: null });
-  return { paused: false, llmApiBaseUrl: null, llmApiKey: null, llmModel: null, telegramBotToken: null, telegramChatId: null };
+  // Lazy-seed with all-null (fall back to env/defaults everywhere).
+  writeGlobal(GLOBAL_DEFAULTS);
+  return { ...GLOBAL_DEFAULTS };
+}
+
+function writeGlobal(s: AiGlobalSettings): void {
+  upsertGlobal.run({
+    paused: s.paused ? 1 : 0,
+    llm_api_base_url: s.llmApiBaseUrl,
+    llm_api_key: s.llmApiKey,
+    llm_model: s.llmModel,
+    classify_prompt: s.classifyPrompt,
+    telegram_bot_token: s.telegramBotToken,
+    telegram_chat_id: s.telegramChatId,
+  });
 }
 
 /** Public-safe view of global settings: secrets replaced with isSet booleans. */
@@ -72,6 +99,8 @@ export interface AiGlobalSettingsPublic {
   llmApiKey: null;
   llmApiKeySet: boolean;
   llmModel: string | null;
+  classifyPrompt: string | null;
+  defaultClassifyPrompt: string;
   telegramBotToken: null;
   telegramBotTokenSet: boolean;
   telegramChatId: string | null;
@@ -85,6 +114,8 @@ export function getGlobalSettingsPublic(): AiGlobalSettingsPublic {
     llmApiKey: null,
     llmApiKeySet: s.llmApiKey != null,
     llmModel: s.llmModel,
+    classifyPrompt: s.classifyPrompt,
+    defaultClassifyPrompt: DEFAULT_CLASSIFY_PROMPT,
     telegramBotToken: null,
     telegramBotTokenSet: s.telegramBotToken != null,
     telegramChatId: s.telegramChatId,
@@ -94,14 +125,7 @@ export function getGlobalSettingsPublic(): AiGlobalSettingsPublic {
 export function updateGlobalSettings(patch: Partial<AiGlobalSettings>): AiGlobalSettings {
   const current = getGlobalSettings();
   const next = { ...current, ...patch };
-  upsertGlobal.run({
-    paused: next.paused ? 1 : 0,
-    llm_api_base_url: next.llmApiBaseUrl,
-    llm_api_key: next.llmApiKey,
-    llm_model: next.llmModel,
-    telegram_bot_token: next.telegramBotToken,
-    telegram_chat_id: next.telegramChatId,
-  });
+  writeGlobal(next);
   return next;
 }
 
@@ -116,6 +140,7 @@ export interface AiAccountSettings {
   autoApply: boolean;
   autoApplyMinConf: number;
   autoApplyActions: AiAction[];
+  customInstructions: string | null;
 }
 
 function toSettings(row: AiAccountSettingsRow): AiAccountSettings {
@@ -126,6 +151,7 @@ function toSettings(row: AiAccountSettingsRow): AiAccountSettings {
     autoApply: row.auto_apply === 1,
     autoApplyMinConf: row.auto_apply_min_conf,
     autoApplyActions: JSON.parse(row.auto_apply_actions) as AiAction[],
+    customInstructions: row.custom_instructions,
   };
 }
 
@@ -135,8 +161,8 @@ const selectSettings = db.prepare(
 
 const insertSettings = db.prepare(
   `INSERT INTO ai_account_settings
-     (account_id, enabled, target_folders, auto_apply, auto_apply_min_conf, auto_apply_actions)
-   VALUES (@account_id, @enabled, @target_folders, @auto_apply, @auto_apply_min_conf, @auto_apply_actions)`,
+     (account_id, enabled, target_folders, auto_apply, auto_apply_min_conf, auto_apply_actions, custom_instructions)
+   VALUES (@account_id, @enabled, @target_folders, @auto_apply, @auto_apply_min_conf, @auto_apply_actions, @custom_instructions)`,
 );
 
 /** Read a settings row, lazily creating one seeded from env defaults. */
@@ -151,6 +177,7 @@ export function getAccountSettings(accountId: string): AiAccountSettings {
     auto_apply: env.ai.defaultAutoApply ? 1 : 0,
     auto_apply_min_conf: env.ai.defaultAutoApplyMinConf,
     auto_apply_actions: JSON.stringify(env.ai.defaultAutoApplyActions),
+    custom_instructions: null,
   };
   insertSettings.run(seeded);
   return toSettings(seeded);
@@ -162,6 +189,7 @@ export interface AiAccountSettingsPatch {
   autoApply?: boolean;
   autoApplyMinConf?: number;
   autoApplyActions?: AiAction[];
+  customInstructions?: string | null;
 }
 
 const updateSettings = db.prepare(
@@ -170,7 +198,8 @@ const updateSettings = db.prepare(
      target_folders = @target_folders,
      auto_apply = @auto_apply,
      auto_apply_min_conf = @auto_apply_min_conf,
-     auto_apply_actions = @auto_apply_actions
+     auto_apply_actions = @auto_apply_actions,
+     custom_instructions = @custom_instructions
    WHERE account_id = @account_id`,
 );
 
@@ -188,6 +217,7 @@ export function updateAccountSettings(
     auto_apply: next.autoApply ? 1 : 0,
     auto_apply_min_conf: next.autoApplyMinConf,
     auto_apply_actions: JSON.stringify(next.autoApplyActions),
+    custom_instructions: next.customInstructions,
   });
   return next;
 }

@@ -30,7 +30,7 @@ export function AiSettingsDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+      <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">AI settings</h2>
           <button onClick={onClose} className="rounded p-1 hover:bg-neutral-100" aria-label="Close">
@@ -53,27 +53,37 @@ export function AiSettingsDialog({
           ))}
         </div>
 
-        {tab === 'global' ? (
-          <GlobalForm onClose={onClose} />
-        ) : (
-          <>
-            <label className="mb-3 block text-sm">
-              <span className="mb-1 block text-neutral-600">Mailbox</span>
-              <select
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
-                value={accountId ?? ''}
-                onChange={(e) => setAccountId(e.target.value)}
-              >
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {tab === 'global' ? (
+            <GlobalForm onClose={onClose} />
+          ) : accounts.length === 0 ? (
+            <p className="text-sm text-neutral-400">Add a mailbox first to configure triage.</p>
+          ) : (
+            <div className="flex gap-4">
+              {/* Mailbox list */}
+              <div className="w-44 shrink-0 space-y-1 border-r border-neutral-200 pr-3">
                 {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
+                  <button
+                    key={a.id}
+                    onClick={() => setAccountId(a.id)}
+                    className={`block w-full truncate rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                      accountId === a.id
+                        ? 'bg-neutral-900 text-white'
+                        : 'text-neutral-700 hover:bg-neutral-100'
+                    }`}
+                    title={a.label}
+                  >
                     {a.label}
-                  </option>
+                  </button>
                 ))}
-              </select>
-            </label>
-            {accountId && <AccountForm key={accountId} accountId={accountId} onClose={onClose} />}
-          </>
-        )}
+              </div>
+              {/* Selected mailbox form */}
+              <div className="min-w-0 flex-1">
+                {accountId && <AccountForm key={accountId} accountId={accountId} onClose={onClose} />}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -98,6 +108,33 @@ function Field({
       <input
         type={type}
         className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-500"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+}
+
+function Textarea({
+  label,
+  placeholder,
+  value,
+  rows = 4,
+  onChange,
+}: {
+  label: string;
+  placeholder?: string;
+  value: string;
+  rows?: number;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block text-neutral-600">{label}</span>
+      <textarea
+        rows={rows}
+        className="w-full resize-y rounded-md border border-neutral-300 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-neutral-500"
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -144,6 +181,7 @@ function GlobalForm({ onClose }: { onClose: () => void }) {
     llmApiBaseUrl: string;
     llmModel: string;
     llmApiKey: SecretState;
+    classifyPrompt: string;
     telegramBotToken: SecretState;
     telegramChatId: string;
   }>(null);
@@ -157,6 +195,7 @@ function GlobalForm({ onClose }: { onClose: () => void }) {
           llmApiBaseUrl: s.llmApiBaseUrl ?? '',
           llmModel: s.llmModel ?? '',
           llmApiKey: { value: '', touched: false },
+          classifyPrompt: s.classifyPrompt ?? '',
           telegramBotToken: { value: '', touched: false },
           telegramChatId: s.telegramChatId ?? '',
         }
@@ -175,6 +214,7 @@ function GlobalForm({ onClose }: { onClose: () => void }) {
       llmApiBaseUrl: model.llmApiBaseUrl.trim() || null,
       llmModel: model.llmModel.trim() || null,
       llmApiKey: secretPatch(model.llmApiKey),
+      classifyPrompt: model.classifyPrompt.trim() || null,
       telegramBotToken: secretPatch(model.telegramBotToken),
       telegramChatId: model.telegramChatId.trim() || null,
     };
@@ -214,6 +254,43 @@ function GlobalForm({ onClose }: { onClose: () => void }) {
           state={model.llmApiKey}
           onChange={(v) => set({ llmApiKey: v })}
         />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+            Classification prompt
+          </p>
+          <div className="flex gap-3 text-xs">
+            <button
+              type="button"
+              className="text-neutral-500 hover:text-neutral-800 disabled:opacity-40"
+              disabled={!s || model.classifyPrompt.trim() === s.defaultClassifyPrompt.trim()}
+              onClick={() => s && set({ classifyPrompt: s.defaultClassifyPrompt })}
+            >
+              Load default to edit
+            </button>
+            <button
+              type="button"
+              className="text-neutral-500 hover:text-neutral-800 disabled:opacity-40"
+              disabled={model.classifyPrompt === ''}
+              onClick={() => set({ classifyPrompt: '' })}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+        <Textarea
+          label="Instructions sent to the model for every message"
+          placeholder="Blank uses the built-in default prompt."
+          rows={8}
+          value={model.classifyPrompt}
+          onChange={(v) => set({ classifyPrompt: v })}
+        />
+        <p className="text-xs text-neutral-400">
+          Describe how mail should be triaged — the required JSON response format is appended
+          automatically. Use “Load default to edit” to start from the built-in prompt, then tweak it.
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -261,6 +338,7 @@ function AccountForm({ accountId, onClose }: { accountId: string; onClose: () =>
     autoApply: boolean;
     autoApplyMinConf: number;
     autoApplyActions: AiAction[];
+    customInstructions: string;
   }>(null);
 
   const s = settings.data;
@@ -273,6 +351,7 @@ function AccountForm({ accountId, onClose }: { accountId: string; onClose: () =>
           autoApply: s.autoApply,
           autoApplyMinConf: s.autoApplyMinConf,
           autoApplyActions: s.autoApplyActions,
+          customInstructions: s.customInstructions ?? '',
         }
       : null);
 
@@ -297,6 +376,7 @@ function AccountForm({ accountId, onClose }: { accountId: string; onClose: () =>
       autoApply: model.autoApply,
       autoApplyMinConf: model.autoApplyMinConf,
       autoApplyActions: model.autoApplyActions,
+      customInstructions: model.customInstructions.trim() || null,
     });
     onClose();
   };
@@ -317,6 +397,14 @@ function AccountForm({ accountId, onClose }: { accountId: string; onClose: () =>
         placeholder="INBOX"
         value={model.targetFolders}
         onChange={(v) => set({ targetFolders: v })}
+      />
+
+      <Textarea
+        label="Extra instructions for this mailbox (optional)"
+        placeholder="e.g. Keep anything from @work.com. Newsletters from Substack can be archived."
+        rows={4}
+        value={model.customInstructions}
+        onChange={(v) => set({ customInstructions: v })}
       />
 
       <div className="rounded-lg border border-neutral-200 p-3">

@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS ai_account_settings (
   auto_apply           INTEGER NOT NULL DEFAULT 0,
   auto_apply_min_conf  REAL NOT NULL DEFAULT 0.9,
   auto_apply_actions   TEXT NOT NULL DEFAULT '["mark_read"]',  -- JSON string[]
+  custom_instructions  TEXT,                                   -- appended per-mailbox guidance
   FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
@@ -128,6 +129,7 @@ CREATE TABLE IF NOT EXISTS ai_global_settings (
   llm_api_base_url    TEXT,   -- NULL → use AI_API_BASE_URL env
   llm_api_key         TEXT,   -- NULL → use AI_API_KEY env
   llm_model           TEXT,   -- NULL → use AI_MODEL env
+  classify_prompt     TEXT,   -- NULL → use built-in DEFAULT_CLASSIFY_PROMPT
   telegram_bot_token  TEXT,   -- NULL → use TELEGRAM_BOT_TOKEN env
   telegram_chat_id    TEXT    -- NULL → use TELEGRAM_CHAT_ID env
 );
@@ -157,6 +159,11 @@ ensureColumn('folders', 'sync_error', 'sync_error TEXT');
 // password; auth_type distinguishes the two so pool.ts knows how to connect.
 ensureColumn('accounts', 'auth_type', "auth_type TEXT NOT NULL DEFAULT 'password'");
 ensureColumn('accounts', 'oauth_provider', 'oauth_provider TEXT');
+
+// Editable classification prompt (NULL → built-in default) and optional
+// per-mailbox guidance appended to it.
+ensureColumn('ai_global_settings', 'classify_prompt', 'classify_prompt TEXT');
+ensureColumn('ai_account_settings', 'custom_instructions', 'custom_instructions TEXT');
 
 // Any folder left 'syncing' from a previous run is stale on boot.
 db.prepare("UPDATE folders SET sync_status = 'idle' WHERE sync_status = 'syncing'").run();

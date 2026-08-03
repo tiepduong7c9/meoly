@@ -107,6 +107,8 @@ export interface AiGlobalSettings {
   llmApiKey: null;
   llmApiKeySet: boolean;
   llmModel: string | null;
+  classifyPrompt: string | null;
+  defaultClassifyPrompt: string;
   telegramBotToken: null;
   telegramBotTokenSet: boolean;
   telegramChatId: string | null;
@@ -117,6 +119,7 @@ export interface AiGlobalSettingsPatch {
   llmApiBaseUrl?: string | null;
   llmApiKey?: string | null;
   llmModel?: string | null;
+  classifyPrompt?: string | null;
   telegramBotToken?: string | null;
   telegramChatId?: string | null;
 }
@@ -128,4 +131,5 @@ export interface AiAccountSettings {
   autoApply: boolean;
   autoApplyMinConf: number;
   autoApplyActions: AiAction[];
+  customInstructions: string | null;
 }
