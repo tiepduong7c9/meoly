@@ -232,9 +232,13 @@ export async function deleteMany(
         return { trashed: false as const };
       }
       for (const chunk of chunkUids(uids)) {
-        await withMailbox(accountId, path, (client) =>
-          client.messageMove({ uid: chunk.join(',') }, trash, { uid: true }),
-        );
+        const seq = chunk.join(',');
+        await withMailbox(accountId, path, async (client) => {
+          // Mark read before trashing so deleted mail never lingers as unread
+          // in Trash. Must happen before the move — the UIDs are gone after.
+          await client.messageFlagsAdd({ uid: seq }, ['\\Seen'], { uid: true });
+          await client.messageMove({ uid: seq }, trash, { uid: true });
+        });
       }
       return { trashed: true as const, target: trash };
     });
