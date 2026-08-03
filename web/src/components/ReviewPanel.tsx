@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Bot, Check, History, Pause, Play, RefreshCw, Settings, Sparkles, X, Zap } from 'lucide-react';
 import type { Account, AiAction, AiBatchAction, AiSuggestion } from '../api/types';
 import {
@@ -30,12 +30,17 @@ const ACTION_STYLE: Record<AiAction, string> = {
 
 const ALL_ACTIONS: AiAction[] = ['keep', 'mark_read', 'archive', 'delete'];
 
+// Persists the timestamp of the last time the user viewed the History tab, so we
+// can badge how many auto-applied actions have landed since.
+const HISTORY_SEEN_KEY = 'meoly:aiHistorySeen';
+
 // Order groups most-destructive first, so the actions needing scrutiny are on top.
 const GROUP_ORDER: AiAction[] = ['delete', 'archive', 'mark_read', 'keep'];
 
 export function ReviewPanel({ accounts }: { accounts: Account[] }) {
   const status = useAiStatus();
   const suggestions = useAiSuggestions('pending');
+  const applied = useAiSuggestions('applied');
   const run = useRunAi();
   const batch = useAiBatchDecision();
   const updateGlobal = useUpdateAiGlobalSettings();
@@ -46,6 +51,35 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
 
   const labelFor = (id: string) => accounts.find((a) => a.id === id)?.label ?? id;
   const items = suggestions.data ?? [];
+  const autoApplied = (applied.data ?? []).filter((s) => s.source === 'ai_auto');
+
+  // Timestamp (ms) the user last viewed the History tab. Seed with "now" on first
+  // run so we count from install, not surface the whole backlog as unseen.
+  const [lastSeenHistory, setLastSeenHistory] = useState<number>(() => {
+    const v = localStorage.getItem(HISTORY_SEEN_KEY);
+    if (v) return Number(v);
+    const now = Date.now();
+    localStorage.setItem(HISTORY_SEEN_KEY, String(now));
+    return now;
+  });
+
+  const markHistorySeen = useCallback(() => {
+    const now = Date.now();
+    localStorage.setItem(HISTORY_SEEN_KEY, String(now));
+    setLastSeenHistory(now);
+  }, []);
+
+  // How many auto-applied actions landed since the last History view.
+  const newHistoryCount = autoApplied.filter((s) => {
+    const t = new Date(s.appliedAt ?? s.createdAt).getTime();
+    return Number.isFinite(t) && t > lastSeenHistory;
+  }).length;
+
+  // While the History tab is open, keep it marked as seen so freshly-arriving
+  // actions don't re-badge the tab the user is already looking at.
+  useEffect(() => {
+    if (tab === 'history') markHistorySeen();
+  }, [tab, autoApplied.length, markHistorySeen]);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -123,6 +157,14 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
             }`}
           >
             <History size={12} /> History
+            {newHistoryCount > 0 && (
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-xs ${tab === 'history' ? 'bg-neutral-800 text-white' : 'bg-emerald-500 text-white'}`}
+                title={`${newHistoryCount} new auto-applied action${newHistoryCount === 1 ? '' : 's'} since you last checked`}
+              >
+                {newHistoryCount}
+              </span>
+            )}
           </button>
         </div>
 
