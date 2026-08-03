@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronRight, Pause, Play, RefreshCw, Settings, Sparkles, X, Zap } from 'lucide-react';
+import { Bot, Check, History, Pause, Play, RefreshCw, Settings, Sparkles, X, Zap } from 'lucide-react';
 import type { Account, AiAction, AiBatchAction, AiSuggestion } from '../api/types';
 import {
   useAiBatchDecision,
@@ -42,6 +42,7 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
   const paused = status.data?.paused ?? false;
   const [showSettings, setShowSettings] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [tab, setTab] = useState<'review' | 'history'>('review');
 
   const labelFor = (id: string) => accounts.find((a) => a.id === id)?.label ?? id;
   const items = suggestions.data ?? [];
@@ -72,8 +73,8 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
 
   return (
     <div className="flex h-full flex-1 flex-col">
-      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-2">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center border-b border-neutral-200 px-4 py-2">
+        <div className="flex flex-1 items-center gap-2">
           <Bot size={18} />
           <span className="text-sm font-semibold">AI Review</span>
           {status.data?.dryRun && (
@@ -95,7 +96,32 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
             <span className="text-xs text-neutral-400">· {status.data.queueDepth} queued</span>
           ) : null}
         </div>
-        <div className="flex items-center gap-1">
+
+        <div className="flex items-center gap-0.5 rounded-md bg-neutral-100 p-0.5 text-xs">
+          <button
+            onClick={() => setTab('review')}
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-medium transition-colors ${
+              tab === 'review' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-700'
+            }`}
+          >
+            <Sparkles size={12} /> Review
+            {items.length > 0 && (
+              <span className={`rounded-full px-1.5 py-0.5 text-xs ${tab === 'review' ? 'bg-neutral-800 text-white' : 'bg-neutral-300 text-neutral-600'}`}>
+                {items.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setTab('history')}
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 font-medium transition-colors ${
+              tab === 'history' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-700'
+            }`}
+          >
+            <History size={12} /> History
+          </button>
+        </div>
+
+        <div className="flex flex-1 items-center justify-end gap-1">
           <button
             onClick={() => updateGlobal.mutate({ paused: !paused })}
             disabled={updateGlobal.isPending || !status.data?.enabled}
@@ -124,7 +150,7 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
       </div>
 
       {/* Bulk action bar */}
-      {items.length > 0 && (
+      {tab === 'review' && items.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 border-b border-neutral-200 bg-neutral-50 px-4 py-2 text-xs">
           <label className="flex items-center gap-1.5 text-neutral-600">
             <input type="checkbox" checked={allSelected} onChange={toggleAll} />
@@ -165,51 +191,55 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
       )}
 
       <div className="flex-1 overflow-y-auto">
-        {suggestions.isLoading && <p className="p-4 text-sm text-neutral-400">Loading…</p>}
-        {suggestions.isError && (
-          <p className="p-4 text-sm text-red-600">{(suggestions.error as Error).message}</p>
+        {tab === 'review' && (
+          <>
+            {suggestions.isLoading && <p className="p-4 text-sm text-neutral-400">Loading…</p>}
+            {suggestions.isError && (
+              <p className="p-4 text-sm text-red-600">{(suggestions.error as Error).message}</p>
+            )}
+            {!suggestions.isLoading && items.length === 0 && (
+              <p className="p-6 text-sm text-neutral-400">
+                Nothing to review. New unread mail is triaged automatically.
+              </p>
+            )}
+            <div className="mx-auto max-w-3xl space-y-5 p-4">
+              {GROUP_ORDER.map((action) => {
+                const group = items.filter((s) => s.action === action);
+                if (group.length === 0) return null;
+                const allInGroupSelected = group.every((s) => selected.has(s.id));
+                return (
+                  <section key={action} className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${ACTION_STYLE[action]}`}>
+                        {ACTION_LABEL[action]}
+                      </span>
+                      <span className="text-xs text-neutral-400">{group.length}</span>
+                      <button
+                        onClick={() => toggleGroup(group.map((s) => s.id), !allInGroupSelected)}
+                        className="text-xs text-neutral-500 hover:text-neutral-800 hover:underline"
+                      >
+                        {allInGroupSelected ? 'Deselect all' : 'Select all'}
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {group.map((s) => (
+                        <SuggestionCard
+                          key={s.id}
+                          s={s}
+                          accountLabel={labelFor(s.accountId)}
+                          selected={selected.has(s.id)}
+                          onToggle={() => toggle(s.id)}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </>
         )}
-        {!suggestions.isLoading && items.length === 0 && (
-          <p className="p-6 text-sm text-neutral-400">
-            Nothing to review. New unread mail is triaged automatically.
-          </p>
-        )}
-        <div className="mx-auto max-w-3xl space-y-5 p-4">
-          {GROUP_ORDER.map((action) => {
-            const group = items.filter((s) => s.action === action);
-            if (group.length === 0) return null;
-            const allInGroupSelected = group.every((s) => selected.has(s.id));
-            return (
-              <section key={action} className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${ACTION_STYLE[action]}`}>
-                    {ACTION_LABEL[action]}
-                  </span>
-                  <span className="text-xs text-neutral-400">{group.length}</span>
-                  <button
-                    onClick={() => toggleGroup(group.map((s) => s.id), !allInGroupSelected)}
-                    className="text-xs text-neutral-500 hover:text-neutral-800 hover:underline"
-                  >
-                    {allInGroupSelected ? 'Deselect all' : 'Select all'}
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {group.map((s) => (
-                    <SuggestionCard
-                      key={s.id}
-                      s={s}
-                      accountLabel={labelFor(s.accountId)}
-                      selected={selected.has(s.id)}
-                      onToggle={() => toggle(s.id)}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
 
-        <AutoAppliedSection accountLabelFor={labelFor} />
+        {tab === 'history' && <HistoryTab accountLabelFor={labelFor} />}
       </div>
 
       {showSettings && (
@@ -226,32 +256,27 @@ function fmtTime(iso: string | null): string {
   return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-/** Read-only log of mail the AI actioned on its own (auto-apply). Collapsed by
- *  default; surfaces the same report Telegram sends, for users not on Telegram. */
-function AutoAppliedSection({ accountLabelFor }: { accountLabelFor: (id: string) => string }) {
+function HistoryTab({ accountLabelFor }: { accountLabelFor: (id: string) => string }) {
   const applied = useAiSuggestions('applied');
-  const [open, setOpen] = useState(false);
   const items = (applied.data ?? []).filter((s) => s.source === 'ai_auto');
-  if (items.length === 0) return null;
+
+  if (applied.isLoading) return <p className="p-4 text-sm text-neutral-400">Loading…</p>;
+  if (applied.isError) return <p className="p-4 text-sm text-red-600">{(applied.error as Error).message}</p>;
+  if (items.length === 0)
+    return (
+      <div className="flex flex-col items-center gap-2 p-10 text-center text-sm text-neutral-400">
+        <Zap size={24} className="text-neutral-300" />
+        <p>No auto-applied actions yet.</p>
+        <p className="text-xs">Actions the AI takes automatically will appear here.</p>
+      </div>
+    );
 
   return (
-    <section className="mx-auto max-w-3xl px-4 pb-6">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1.5 border-t border-neutral-200 pt-4 text-xs font-medium text-neutral-500 hover:text-neutral-800"
-      >
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <Zap size={13} /> Recently auto-applied
-        <span className="text-neutral-400">{items.length}</span>
-      </button>
-      {open && (
-        <div className="mt-3 space-y-1.5">
-          {items.map((s) => (
-            <AutoAppliedRow key={s.id} s={s} accountLabel={accountLabelFor(s.accountId)} />
-          ))}
-        </div>
-      )}
-    </section>
+    <div className="mx-auto max-w-3xl space-y-1.5 p-4">
+      {items.map((s) => (
+        <AutoAppliedRow key={s.id} s={s} accountLabel={accountLabelFor(s.accountId)} />
+      ))}
+    </div>
   );
 }
 
