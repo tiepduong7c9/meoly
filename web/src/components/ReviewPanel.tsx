@@ -61,14 +61,19 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
       return next;
     });
 
+  // Count only selected ids still present in the list — cards resolved via an
+  // individual action (or Telegram) leave the list, and their stale ids must
+  // not keep inflating the "N selected" count.
+  const selectedIds = items.filter((s) => selected.has(s.id)).map((s) => s.id);
+  const selectedCount = selectedIds.length;
+
   const allSelected = items.length > 0 && items.every((s) => selected.has(s.id));
   const toggleAll = () =>
     setSelected(allSelected ? new Set() : new Set(items.map((s) => s.id)));
 
   const applyBulk = (action: AiBatchAction) => {
-    const ids = items.filter((s) => selected.has(s.id)).map((s) => s.id);
-    if (ids.length === 0) return;
-    batch.mutate({ ids, action }, { onSuccess: () => setSelected(new Set()) });
+    if (selectedIds.length === 0) return;
+    batch.mutate({ ids: selectedIds, action }, { onSuccess: () => setSelected(new Set()) });
   };
 
   return (
@@ -154,9 +159,9 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
         <div className="flex flex-wrap items-center gap-1.5 border-b border-neutral-200 bg-neutral-50 px-4 py-2 text-xs">
           <label className="flex items-center gap-1.5 text-neutral-600">
             <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-            {selected.size > 0 ? `${selected.size} selected` : 'Select all'}
+            {selectedCount > 0 ? `${selectedCount} selected` : 'Select all'}
           </label>
-          {selected.size > 0 && (
+          {selectedCount > 0 && (
             <>
               <span className="mx-1 h-4 w-px bg-neutral-300" />
               <button
