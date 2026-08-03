@@ -80,7 +80,14 @@ export function AccountSidebar({
             key={account.id}
             account={account}
             expanded={selectedAccount === account.id}
-            selectedFolder={selectedAccount === account.id ? selectedFolder : null}
+            // The header highlight tracks the active mail view — while the AI
+            // Review is open, no account is "selected", so drop the highlight.
+            selected={selectedAccount === account.id && view === 'mail'}
+            // Likewise drop the active-folder highlight in the review view so
+            // nothing in the mail tree looks selected.
+            selectedFolder={
+              selectedAccount === account.id && view === 'mail' ? selectedFolder : null
+            }
             onSelectAccount={() => onSelectAccount(account.id)}
             onSelectFolder={onSelectFolder}
           />
@@ -95,12 +102,14 @@ export function AccountSidebar({
 function AccountBlock({
   account,
   expanded,
+  selected,
   selectedFolder,
   onSelectAccount,
   onSelectFolder,
 }: {
   account: Account;
   expanded: boolean;
+  selected: boolean;
   selectedFolder: string | null;
   onSelectAccount: () => void;
   onSelectFolder: (path: string) => void;
@@ -156,13 +165,13 @@ function AccountBlock({
       <button
         onClick={onSelectAccount}
         className={`group flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm font-semibold tracking-wide ${
-          expanded ? 'bg-neutral-800 text-white' : 'hover:bg-neutral-100'
+          selected ? 'bg-neutral-800 text-white' : 'hover:bg-neutral-100'
         }`}
       >
         <span className="flex items-center gap-1.5 truncate">
           <ChevronRight
             size={13}
-            className={`shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90 text-white/60' : 'text-neutral-400'}`}
+            className={`shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''} ${selected ? 'text-white/60' : 'text-neutral-400'}`}
           />
           <span className="truncate">{account.label}</span>
         </span>
@@ -170,11 +179,19 @@ function AccountBlock({
           {expanded ? (
             // Expanded: allow a manual sync (spinner while a pass is running).
             syncing ? (
-              <RefreshCw size={13} className="animate-spin text-white/60" aria-label="Syncing" />
+              <RefreshCw
+                size={13}
+                className={`animate-spin ${selected ? 'text-white/60' : 'text-neutral-400'}`}
+                aria-label="Syncing"
+              />
             ) : (
               <RefreshCw
                 size={13}
-                className="text-white/60 hover:text-white"
+                className={
+                  selected
+                    ? 'text-white/60 hover:text-white'
+                    : 'text-neutral-400 hover:text-neutral-700'
+                }
                 onClick={syncNow}
                 aria-label="Sync now"
               />

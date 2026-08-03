@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronRight, Pause, Play, RefreshCw, Settings, X, Zap } from 'lucide-react';
+import { Bot, Check, ChevronDown, ChevronRight, Pause, Play, RefreshCw, Settings, Sparkles, X, Zap } from 'lucide-react';
 import type { Account, AiAction, AiBatchAction, AiSuggestion } from '../api/types';
 import {
   useAiBatchDecision,
@@ -350,7 +350,12 @@ function SuggestionCard({
           {s.category && <span className="rounded bg-neutral-100 px-1.5 py-0.5">{s.category}</span>}
           {s.confidence != null && <span>{Math.round(s.confidence * 100)}% confident</span>}
         </div>
-        {s.reasoning && <p className="mt-1.5 text-xs italic text-neutral-500">{s.reasoning}</p>}
+        {s.reasoning && (
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-blue-100 bg-blue-50 px-2.5 py-2">
+            <Sparkles size={14} className="mt-0.5 shrink-0 text-blue-500" />
+            <p className="text-xs leading-relaxed text-neutral-700">{s.reasoning}</p>
+          </div>
+        )}
 
         {open && <EmailModal s={s} accountLabel={accountLabel} onClose={() => setOpen(false)} />}
 
