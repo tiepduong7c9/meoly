@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Bot, Check, Pause, Play, RefreshCw, Settings, X } from 'lucide-react';
+import { Bot, Check, ChevronDown, ChevronRight, Pause, Play, RefreshCw, Settings, X, Zap } from 'lucide-react';
 import type { Account, AiAction, AiBatchAction, AiSuggestion } from '../api/types';
 import {
   useAiBatchDecision,
   useAiDecision,
+  useAiOverride,
   useAiStatus,
   useAiSuggestions,
   useMessage,
@@ -207,11 +208,88 @@ export function ReviewPanel({ accounts }: { accounts: Account[] }) {
             );
           })}
         </div>
+
+        <AutoAppliedSection accountLabelFor={labelFor} />
       </div>
 
       {showSettings && (
         <AiSettingsDialog accounts={accounts} onClose={() => setShowSettings(false)} />
       )}
+    </div>
+  );
+}
+
+function fmtTime(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+/** Read-only log of mail the AI actioned on its own (auto-apply). Collapsed by
+ *  default; surfaces the same report Telegram sends, for users not on Telegram. */
+function AutoAppliedSection({ accountLabelFor }: { accountLabelFor: (id: string) => string }) {
+  const applied = useAiSuggestions('applied');
+  const [open, setOpen] = useState(false);
+  const items = (applied.data ?? []).filter((s) => s.source === 'ai_auto');
+  if (items.length === 0) return null;
+
+  return (
+    <section className="mx-auto max-w-3xl px-4 pb-6">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1.5 border-t border-neutral-200 pt-4 text-xs font-medium text-neutral-500 hover:text-neutral-800"
+      >
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <Zap size={13} /> Recently auto-applied
+        <span className="text-neutral-400">{items.length}</span>
+      </button>
+      {open && (
+        <div className="mt-3 space-y-1.5">
+          {items.map((s) => (
+            <AutoAppliedRow key={s.id} s={s} accountLabel={accountLabelFor(s.accountId)} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** One auto-applied entry, with an inline "override" to re-action the message. */
+function AutoAppliedRow({ s, accountLabel }: { s: AiSuggestion; accountLabel: string }) {
+  const override = useAiOverride();
+  const applied = s.appliedAction ?? s.action;
+  return (
+    <div className="rounded-md border border-neutral-100 bg-neutral-50 px-3 py-2 text-xs">
+      <div className="flex items-center gap-2">
+        <span className={`shrink-0 rounded px-1.5 py-0.5 font-medium ${ACTION_STYLE[applied]}`}>
+          {ACTION_LABEL[applied]}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-neutral-800">
+          {s.subject || '(no subject)'}
+          {s.dryRun && <span className="ml-1 text-amber-600">(dry run)</span>}
+        </span>
+        <span className="shrink-0 text-neutral-400">
+          {accountLabel} · {fmtTime(s.appliedAt ?? s.createdAt)}
+        </span>
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <span className="text-neutral-400">Change to</span>
+        {ALL_ACTIONS.filter((a) => a !== applied).map((a) => (
+          <button
+            key={a}
+            onClick={() => override.mutate({ id: s.id, action: a })}
+            disabled={override.isPending}
+            className="rounded border border-neutral-200 bg-white px-1.5 py-0.5 hover:bg-neutral-100 disabled:opacity-50"
+          >
+            {ACTION_LABEL[a]}
+          </button>
+        ))}
+        {override.isPending && <RefreshCw size={11} className="animate-spin text-neutral-400" />}
+        {override.isError && (
+          <span className="text-red-600">{(override.error as Error).message}</span>
+        )}
+      </div>
     </div>
   );
 }

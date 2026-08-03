@@ -11,6 +11,7 @@ import {
 import { api } from './api/client';
 import type {
   AiAccountSettings,
+  AiAction,
   AiBatchAction,
   AiDecision,
   AiGlobalSettingsPatch,
@@ -248,6 +249,19 @@ export function useAiDecision() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['ai'] });
       // A decision may move/read mail, so refresh the mail views too.
+      qc.invalidateQueries({ queryKey: ['messages'] });
+      qc.invalidateQueries({ queryKey: ['folders'] });
+    },
+  });
+}
+
+export function useAiOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; action: AiAction }) => api.aiOverride(v.id, v.action),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['ai'] });
+      // Override moves/reflags mail, so refresh the mail views too.
       qc.invalidateQueries({ queryKey: ['messages'] });
       qc.invalidateQueries({ queryKey: ['folders'] });
     },

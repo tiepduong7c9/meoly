@@ -317,6 +317,64 @@ const setStatus = db.prepare(
    WHERE id = @id AND status = @expected_status`,
 );
 
+const overrideStmt = db.prepare(
+  `UPDATE ai_suggestions SET
+     status = 'applied',
+     applied_action = @applied_action,
+     source = @source,
+     dry_run = @dry_run,
+     error = NULL,
+     reviewed_at = @now,
+     applied_at = @now
+   WHERE id = @id`,
+);
+
+/** Re-stamp an already-applied suggestion after a manual override of its action. */
+export function recordOverride(
+  id: string,
+  action: AiAction,
+  source: AiDecisionSource,
+  dryRun: boolean,
+): void {
+  overrideStmt.run({
+    id,
+    applied_action: action,
+    source,
+    dry_run: dryRun ? 1 : 0,
+    now: new Date().toISOString(),
+  });
+}
+
+/** Current folder/uid of a triaged message, located by its Message-ID (it may
+ *  have moved folders — and changed UID — since the suggestion was created). */
+const findLocationStmt = db.prepare(
+  `SELECT folder_path AS folderPath, uid, seen FROM messages
+   WHERE account_id = ? AND message_id = ?
+   ORDER BY date DESC LIMIT 1`,
+);
+
+export function findMessageLocation(
+  accountId: string,
+  messageId: string,
+): { folderPath: string; uid: number; seen: boolean } | undefined {
+  const r = findLocationStmt.get(accountId, messageId) as
+    | { folderPath: string; uid: number; seen: number }
+    | undefined;
+  return r ? { folderPath: r.folderPath, uid: r.uid, seen: !!r.seen } : undefined;
+}
+
+/** Whether a folder is the account's Trash (by advertised \Trash special-use). */
+const folderSpecialUseStmt = db.prepare(
+  'SELECT special_use FROM folders WHERE account_id = ? AND path = ?',
+);
+
+export function isTrashFolder(accountId: string, path: string): boolean {
+  const r = folderSpecialUseStmt.get(accountId, path) as
+    | { special_use: string | null }
+    | undefined;
+  return r?.special_use === '\\Trash';
+}
+
 export interface StatusTransition {
   status: AiSuggestionStatus;
   expectedStatus?: AiSuggestionStatus;

@@ -1,6 +1,7 @@
 import type {
   Account,
   AiAccountSettings,
+  AiAction,
   AiBatchAction,
   AiDecision,
   AiGlobalSettings,
@@ -167,6 +168,12 @@ export const api = {
   aiDecide: (id: string, action: AiDecision) =>
     request<{ ok: true; status: string; applied: boolean; dryRun: boolean; alreadyResolved: boolean }>(
       `/api/ai/suggestions/${id}/decision`,
+      { method: 'POST', body: JSON.stringify({ action }) },
+    ),
+
+  aiOverride: (id: string, action: AiAction) =>
+    request<{ ok: true; status: string; applied: boolean; dryRun: boolean }>(
+      `/api/ai/suggestions/${id}/override`,
       { method: 'POST', body: JSON.stringify({ action }) },
     ),
 
