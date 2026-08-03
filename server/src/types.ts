@@ -95,6 +95,7 @@ export interface AiAccountSettingsRow {
   auto_apply: number;
   auto_apply_min_conf: number;
   auto_apply_actions: string; // JSON string[]
+  custom_instructions: string | null;
 }
 
 export interface AiSuggestionRow {

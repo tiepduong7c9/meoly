@@ -133,6 +133,7 @@ const globalSettingsSchema = z.object({
   llmApiBaseUrl: optStr,
   llmApiKey: optStr,
   llmModel: optStr,
+  classifyPrompt: optStr,
   telegramBotToken: optStr,
   telegramChatId: optStr,
 });
@@ -160,6 +161,7 @@ const settingsSchema = z.object({
   autoApply: z.boolean().optional(),
   autoApplyMinConf: z.number().min(0).max(1).optional(),
   autoApplyActions: z.array(z.enum(['keep', 'mark_read', 'archive', 'delete'])).optional(),
+  customInstructions: optStr,
 });
 
 aiRouter.get('/accounts/:id/settings', (req, res) => {
