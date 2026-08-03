@@ -387,7 +387,18 @@ function SuggestionCard({
           </div>
         )}
 
-        {open && <EmailModal s={s} accountLabel={accountLabel} onClose={() => setOpen(false)} />}
+        {open && (
+          <EmailModal
+            s={s}
+            accountLabel={accountLabel}
+            pending={pending}
+            onAct={(action) => {
+              act(action);
+              setOpen(false);
+            }}
+            onClose={() => setOpen(false)}
+          />
+        )}
 
         <div
           className="mt-2.5 flex flex-wrap items-center gap-1.5"
@@ -430,13 +441,18 @@ function SuggestionCard({
 function EmailModal({
   s,
   accountLabel,
+  pending,
+  onAct,
   onClose,
 }: {
   s: AiSuggestion;
   accountLabel: string;
+  pending: boolean;
+  onAct: (action: AiAction | 'reject') => void;
   onClose: () => void;
 }) {
   const { data, isLoading, isError, error } = useMessage(s.accountId, s.folderPath, s.uid);
+  const suggested = s.action;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -476,6 +492,36 @@ function EmailModal({
               <MessageBody html={data.body.html} text={data.body.text} />
             </>
           )}
+        </div>
+
+        {/* Action footer: act on the email without leaving the reader. */}
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-200 p-3">
+          <button
+            onClick={() => onAct(suggested)}
+            disabled={pending}
+            className="flex items-center gap-1 rounded-md bg-neutral-800 px-2.5 py-1 text-xs font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
+          >
+            <Check size={13} /> Approve · {ACTION_LABEL[suggested]}
+          </button>
+          <span className="ml-1 text-xs text-neutral-400">or</span>
+          {ALL_ACTIONS.filter((a) => a !== suggested).map((a) => (
+            <button
+              key={a}
+              onClick={() => onAct(a)}
+              disabled={pending}
+              className="rounded-md border border-neutral-200 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50"
+            >
+              {ACTION_LABEL[a]}
+            </button>
+          ))}
+          <button
+            onClick={() => onAct('reject')}
+            disabled={pending}
+            className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 disabled:opacity-50"
+            title="Dismiss without acting"
+          >
+            <X size={13} /> Dismiss
+          </button>
         </div>
       </div>
     </div>
