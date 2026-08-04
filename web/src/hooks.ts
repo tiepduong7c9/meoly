@@ -219,7 +219,16 @@ export function useMessage(
   return useQuery({
     queryKey: ['message', accountId, folder, uid],
     queryFn: () => api.getMessage(accountId!, folder!, uid!),
-    enabled: !!accountId && !!folder && uid != null,
+    enabled: !!accountId && !!folder && uid != null && uid !== 0,
+  });
+}
+
+export function useSuggestionBody(suggestionId: string | null) {
+  return useQuery({
+    queryKey: ['ai', 'suggestion-body', suggestionId],
+    queryFn: () => api.aiSuggestionBody(suggestionId!),
+    enabled: !!suggestionId,
+    retry: false,
   });
 }
 

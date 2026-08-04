@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { env } from '../env.js';
 import {
   countByStatus,
+  findMessageLocation,
   getAccountSettings,
   getGlobalSettings,
   getGlobalSettingsPublic,
@@ -16,6 +17,7 @@ import type { AiSuggestionStatus } from '../types.js';
 import { queueDepth, triageAccount, triageAllAccounts } from '../ai/triage.js';
 import { triggerAiTriage } from '../ai/scheduler.js';
 import { startTelegram } from '../telegram/bot.js';
+import { getMessage } from '../services/messages.js';
 
 // Mounted at /api/ai
 export const aiRouter: Router = Router();
@@ -101,6 +103,25 @@ aiRouter.post('/suggestions/:id/decision', async (req, res) => {
   }
   const result = await applyDecision(req.params.id, parsed.data.action, 'web');
   res.json({ ok: true, ...result });
+});
+
+// Fetch the email body for a suggestion, resolving the message's current folder
+// via Message-ID (the message may have moved since the action was applied).
+aiRouter.get('/suggestions/:id/body', async (req, res) => {
+  const s = getSuggestion(req.params.id);
+  if (!s) {
+    res.status(404).json({ error: 'Suggestion not found' });
+    return;
+  }
+  const located = s.messageId ? findMessageLocation(s.accountId, s.messageId) : undefined;
+  const folderPath = located?.folderPath ?? s.folderPath;
+  const uid = located?.uid ?? s.uid;
+  const message = await getMessage(s.accountId, folderPath, uid);
+  if (!message) {
+    res.status(404).json({ error: 'Message not found' });
+    return;
+  }
+  res.json(message);
 });
 
 const overrideSchema = z.object({

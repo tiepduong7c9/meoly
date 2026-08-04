@@ -165,6 +165,9 @@ export const api = {
   aiSuggestions: (status = 'pending') =>
     request<AiSuggestion[]>(`/api/ai/suggestions?status=${encodeURIComponent(status)}`),
 
+  aiSuggestionBody: (id: string) =>
+    request<MessageDetail>(`/api/ai/suggestions/${id}/body`),
+
   aiDecide: (id: string, action: AiDecision) =>
     request<{ ok: true; status: string; applied: boolean; dryRun: boolean; alreadyResolved: boolean }>(
       `/api/ai/suggestions/${id}/decision`,
