@@ -9,6 +9,7 @@ import {
   useAiSuggestions,
   useMessage,
   useRunAi,
+  useSuggestionBody,
   useUpdateAiGlobalSettings,
 } from '../hooks';
 import { AiSettingsDialog } from './AiSettingsDialog';
@@ -330,10 +331,15 @@ function HistoryTab({ accountLabelFor }: { accountLabelFor: (id: string) => stri
 /** One auto-applied entry, with an inline "override" to re-action the message. */
 function AutoAppliedRow({ s, accountLabel }: { s: AiSuggestion; accountLabel: string }) {
   const override = useAiOverride();
+  const [open, setOpen] = useState(false);
   const applied = s.appliedAction ?? s.action;
   return (
-    <div className="rounded-md border border-neutral-100 bg-neutral-50 px-3 py-2 text-xs">
-      <div className="flex items-center gap-2">
+    <div className="rounded-md border border-neutral-100 bg-neutral-50 text-xs">
+      <button
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-neutral-100 rounded-md"
+        title="View email"
+      >
         <span className={`shrink-0 rounded px-1.5 py-0.5 font-medium ${ACTION_STYLE[applied]}`}>
           {ACTION_LABEL[applied]}
         </span>
@@ -344,8 +350,8 @@ function AutoAppliedRow({ s, accountLabel }: { s: AiSuggestion; accountLabel: st
         <span className="shrink-0 text-neutral-400">
           {accountLabel} · {fmtTime(s.appliedAt ?? s.createdAt)}
         </span>
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      </button>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 px-3 pb-2" onClick={(e) => e.stopPropagation()}>
         <span className="text-neutral-400">Change to</span>
         {ALL_ACTIONS.filter((a) => a !== applied).map((a) => (
           <button
@@ -361,6 +367,99 @@ function AutoAppliedRow({ s, accountLabel }: { s: AiSuggestion; accountLabel: st
         {override.isError && (
           <span className="text-red-600">{(override.error as Error).message}</span>
         )}
+      </div>
+      {open && (
+        <HistoryEmailModal
+          s={s}
+          accountLabel={accountLabel}
+          appliedAction={applied}
+          isPending={override.isPending}
+          overrideError={override.isError ? (override.error as Error).message : null}
+          onOverride={(a) => override.mutate(
+            { id: s.id, action: a },
+            { onSuccess: () => setOpen(false) },
+          )}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function HistoryEmailModal({
+  s,
+  accountLabel,
+  appliedAction,
+  isPending,
+  overrideError,
+  onOverride,
+  onClose,
+}: {
+  s: AiSuggestion;
+  accountLabel: string;
+  appliedAction: AiAction;
+  isPending: boolean;
+  overrideError: string | null;
+  onOverride: (action: AiAction) => void;
+  onClose: () => void;
+}) {
+  const { data, isLoading, isError, error } = useSuggestionBody(s.id);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => { e.stopPropagation(); onClose(); }}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-neutral-200 p-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${ACTION_STYLE[appliedAction]}`}>
+                {ACTION_LABEL[appliedAction]}
+              </span>
+              <h2 className="truncate text-base font-semibold">{s.subject || '(no subject)'}</h2>
+            </div>
+            <div className="truncate text-xs text-neutral-500 mt-1">
+              {s.fromAddr || 'unknown'} · {accountLabel} · {s.folderPath}
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded p-1 hover:bg-neutral-100" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {isLoading && <p className="text-sm text-neutral-400">Loading email…</p>}
+          {isError && <p className="text-sm text-red-600">{(error as Error).message}</p>}
+          {data && (
+            <>
+              {data.body.attachments.length > 0 && (
+                <div className="mb-2 text-xs text-neutral-500">
+                  {data.body.attachments.length} attachment(s)
+                </div>
+              )}
+              <MessageBody html={data.body.html} text={data.body.text} />
+            </>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-200 p-3">
+          <span className="text-xs text-neutral-500">Change to</span>
+          {ALL_ACTIONS.filter((a) => a !== appliedAction).map((a) => (
+            <button
+              key={a}
+              onClick={() => onOverride(a)}
+              disabled={isPending}
+              className="rounded-md border border-neutral-200 bg-white px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50"
+            >
+              {ACTION_LABEL[a]}
+            </button>
+          ))}
+          {isPending && <RefreshCw size={11} className="animate-spin text-neutral-400" />}
+          {overrideError && <span className="text-red-600">{overrideError}</span>}
+        </div>
       </div>
     </div>
   );
